@@ -1,0 +1,25 @@
+# Central account ID (placeholder - update with actual account ID)
+central_account_id = "123456789012"
+
+# Member account IDs for testing (placeholder - update with actual account IDs)
+member_account_ids = [
+  "234567890123",
+  "345678901234"
+]
+
+# Project configuration
+project_prefix = "aiops-platform"
+environment    = "dev"
+
+# AWS Region
+aws_region = "eu-central-1"
+
+# Data retention
+retention_days = 90
+
+# Tags
+tags = {
+  Project     = "AIOps Platform"
+  Environment = "dev"
+  ManagedBy   = "terraform"
+}

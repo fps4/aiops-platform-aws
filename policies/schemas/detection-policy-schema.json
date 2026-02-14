@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AIOps Detection Policy",
+  "type": "object",
+  "required": ["detection_policies"],
+  "properties": {
+    "detection_policies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/policy"
+      }
+    }
+  },
+  "definitions": {
+    "policy": {
+      "type": "object",
+      "required": ["name", "scope", "detection", "actions"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "description": "Policy name (lowercase, alphanumeric, hyphens)"
+        },
+        "description": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "object",
+          "required": ["accounts", "services"],
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            },
+            "services": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "detection": {
+          "type": "object",
+          "required": ["type", "metric", "baseline_window", "sensitivity", "threshold"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["statistical", "rule-based"]
+            },
+            "metric": {
+              "type": "string"
+            },
+            "baseline_window": {
+              "type": "string",
+              "pattern": "^[0-9]+(d|h|m)$"
+            },
+            "sensitivity": {
+              "type": "string",
+              "enum": ["low", "medium", "high"]
+            },
+            "threshold": {
+              "type": "object"
+            }
+          }
+        },
+        "actions": {
+          "type": "object",
+          "required": ["alert", "run_rca"],
+          "properties": {
+            "alert": {
+              "type": "boolean"
+            },
+            "run_rca": {
+              "type": "boolean"
+            },
+            "agent_provider": {
+              "type": "string"
+            },
+            "suppress_similar_minutes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

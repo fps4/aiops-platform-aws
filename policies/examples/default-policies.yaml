@@ -1,0 +1,47 @@
+# Minimal Example Detection Policy
+
+detection_policies:
+  - name: api-latency-spike
+    description: "Detect latency spikes in API services"
+    scope:
+      accounts:
+        - "123456789012"  # Replace with actual account IDs
+      services:
+        - "api-gateway"
+        - "user-service"
+    detection:
+      type: statistical
+      metric: p95_latency_ms
+      baseline_window: 7d
+      sensitivity: medium  # low, medium, high
+      threshold:
+        z_score: 3.0
+        min_deviation_pct: 50
+    actions:
+      alert: true
+      run_rca: true
+      agent_provider: bedrock-claude-sonnet
+      suppress_similar_minutes: 30
+
+  - name: high-error-rate
+    description: "Detect elevated error rates"
+    scope:
+      accounts:
+        - "123456789012"
+      services:
+        - "api-gateway"
+        - "user-service"
+        - "payment-service"
+    detection:
+      type: rule-based
+      metric: error_rate_pct
+      baseline_window: 1h
+      sensitivity: high
+      threshold:
+        error_rate_pct: 5.0
+        duration_minutes: 5
+    actions:
+      alert: true
+      run_rca: true
+      agent_provider: bedrock-claude-haiku
+      suppress_similar_minutes: 15

@@ -49,12 +49,13 @@ The AIOps Platform autonomously **investigates anomalies before alerting you**, 
 
 | Document | Description |
 |----------|-------------|
-| [Product Summary](./docs/product-summary.md) | Vision, capabilities, architecture principles, and roadmap |
-| [UX Requirements](./docs/requirements-ux.md) | User workflows, personas, and phased feature rollout |
-| [Solution Design](./docs/solution-design.md) | Architecture diagrams, component details, and deployment guide |
-| [Getting Started](./docs/getting-started.md) | Step-by-step setup instructions *(coming soon)* |
-| [Detection Policies](./docs/detection-policies.md) | Policy configuration reference *(coming soon)* |
-| [AI Provider Guide](./docs/ai-providers.md) | Configure Bedrock, OpenAI, or self-hosted LLMs *(coming soon)* |
+| [Product Summary](./docs/1-product-summary.md) | Vision, capabilities, architecture principles |
+| [UX Requirements](./docs/2-requirements-ux.md) | User workflows, personas, and feature rollout |
+| [Solution Design](./docs/3-solution-design.md) | Architecture diagrams and component details |
+| [MVP Development Plan](./docs/mvp-development-plan.md) | 6-step implementation plan |
+| [Local Development](./docs/local-development.md) | **NEW!** Setup guide for AWS Bedrock and local testing |
+| [Terraform Guide](./terraform/README.md) | Infrastructure deployment instructions |
+| [Features Roadmap](./FEATURES.md) | Current and planned capabilities |
 
 ---
 

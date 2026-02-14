@@ -1,3 +1,66 @@
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfvars
+backend.conf
+*.tfstate.*
+*.tfvars.backup
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.coverage
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# AWS
+.aws-sam/
+
+# Lambda deployment packages
+function.zip
+package/
+
 # Logs
 logs
 *.log

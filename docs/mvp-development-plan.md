@@ -27,22 +27,22 @@
 ### Step 1.1: Core Infrastructure
 
 #### Tasks
-- [ ] **1.1.1 Setup Project Structure**
+- [x] **1.1.1 Setup Project Structure**
   - Initialize Git repository with folder structure from README.md
   - Setup pre-commit hooks (Terraform fmt, Python linting)
   - Configure GitHub repository settings
 
-- [ ] **1.1.2 Terraform Networking Module**
-  - VPC with 3 private subnets (eu-central-1a/b/c)
-  - VPC endpoints: S3, DynamoDB, Secrets Manager, Lambda
-  - Security groups with least privilege rules
+- [x] **1.1.2 Terraform Networking Module**
+  - ~~VPC with 3 private subnets (eu-central-1a/b/c)~~ **SKIPPED FOR MVP**
+  - ~~VPC endpoints: S3, DynamoDB, Secrets Manager, Lambda~~ **SKIPPED FOR MVP**
+  - ~~Security groups with least privilege rules~~ **SKIPPED FOR MVP**
 
-- [ ] **1.1.3 Terraform IAM Module**
+- [x] **1.1.3 Terraform IAM Module**
   - Central account IAM roles (Lambda, Step Functions, SageMaker)
   - Cross-account role template for member accounts
   - IAM policies for observability (read CloudWatch, write to Kinesis)
 
-- [ ] **1.1.4 Terraform Data Stores Module**
+- [x] **1.1.4 Terraform Data Stores Module**
   - S3 buckets: raw-logs, audit-logs, dashboards-screenshots (with lifecycle)
   - DynamoDB tables: anomalies, events, policy_store, agent_state, audit_logs
   - OpenSearch Serverless collection with IAM auth
