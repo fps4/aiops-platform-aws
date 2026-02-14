@@ -2,7 +2,7 @@
 
 ## Observe - Engage - Automate
 
-AIOps platform that centralizes AWS signals, applies hybrid anomaly detection, and uses agentic reasoning with pluggable AI providers (including self-hosted open-source LLMs).
+Agentic AIOps platform that centralizes AWS signals, applies hybrid anomaly detection, and uses agentic reasoning with pluggable AI providers (including self-hosted open-source LLMs).
 
 **Current scope**: Observe and Engage features (Automate deferred to future phases).
 
@@ -12,8 +12,7 @@ AIOps platform that centralizes AWS signals, applies hybrid anomaly detection, a
 - Agentic workflow that turns anomalies into RCA, recommendations, and actionable alerts.
 
 ## Who it’s for
-- **Platform/SRE teams**: implement and customize the platform for their organization; own ingestion, governance, detection policies, orchestration, and cost controls.
-- **Service teams**: own service-level signals, deployment metadata, and runbooks; consume alerts, insights, and recommendations.
+- **Platform/SRE teams**: implement and customize the platform for their organization; own ingestion, governance, detection policies, orchestration, and cost controls; consume alerts, insights, and recommendations.
 - **Open-source contributors**: extend detection algorithms, add integrations, improve agentic workflows, and share best practices.
 
 ## Tenets
@@ -75,18 +74,20 @@ AIOps platform that centralizes AWS signals, applies hybrid anomaly detection, a
   - **SageMaker Serverless Inference**: pay-per-use for infrequent usage patterns
   - **EKS with GPU nodes**: full control, node autoscaling, spot instances for cost optimization
   - **ECS/Fargate with Inferentia/Graviton**: AWS-optimized inference chips for cost-effective deployment
-- **Multi-tenancy support**: per-account or per-service provider selection; cost allocation tags.
+- **Multi-tenancy support**: per-account provider selection; cost allocation tags.
 - **Privacy & security**: keep sensitive data in-account with self-hosted models; PII redaction before external API calls; comprehensive prompt/response audit logging.
 - **Model registry**: track model versions, performance metrics, and cost per provider; enable A/B testing and gradual rollouts.
 
 ### Alerting & UX - **Engage scope**
-- **Rich alert payload**: what happened, why we think it happened, what changed, confidence score, what to do next (links to evidence/runbooks/dashboards).
-- **Notification channels**: Slack, Microsoft Teams, OpsGenie, PagerDuty, SNS, email.
-- **Web UI** (AWS-hosted or self-hosted):
-  - Timeline view: unified incident timeline across accounts
-  - Chat interface: natural language queries over observability data
-  - Evidence explorer: drill into logs/metrics/traces from alerts
-  - Feedback loop: thumbs up/down on RCA quality to improve models
+- **Rich alert payload**: what happened, why we think it happened, what changed, confidence score, what to do next (links to OpenSearch dashboards/runbooks).
+- **Primary interface**: Slack for notifications and interactive chat with natural language queries over observability data.
+- **Notification format**: 
+  - Structured message with RCA summary, confidence score, and context
+  - Direct link to OpenSearch dashboard for detailed investigation
+  - Screenshot of relevant visualization (if feasible with OpenSearch APIs)
+- **Dashboards**: AWS OpenSearch UI for timeline views, evidence exploration, and drill-down into logs/metrics/traces.
+- **Feedback loop**: Slack reactions (👍/👎) on RCA quality to improve models.
+- **Additional channels**: Microsoft Teams, OpsGenie, PagerDuty, SNS, email with similar rich payloads.
 - **Extensible integrations**: plugin architecture for custom notification/ticketing systems.
 
 ### Security, trust, cost
@@ -106,9 +107,10 @@ AIOps platform that centralizes AWS signals, applies hybrid anomaly detection, a
 - **Agentic workflows**: Step Functions (serverless orchestration) or ECS/Fargate (long-running agents)
 
 ### Control plane (Engage)
-- **API layer**: API Gateway + Lambda or Application Load Balancer + ECS
+- **API layer**: API Gateway + Lambda or Application Load Balancer + ECS (for Slack bot and webhook handlers)
 - **State management**: DynamoDB (policy store, agent state, audit logs)
 - **Orchestration**: Step Functions for workflow coordination
+- **Dashboards**: AWS OpenSearch Dashboards (built-in) for visualization and exploration
 
 ### AI/LLM infrastructure
 - **Commercial**: AWS Bedrock (managed, multi-model), API clients for OpenAI/Anthropic
@@ -120,7 +122,7 @@ AIOps platform that centralizes AWS signals, applies hybrid anomaly detection, a
 - **Model management**: SageMaker Model Registry or custom metadata store
 
 ### Infrastructure as Code
-- **Deployment**: AWS CDK or Terraform modules for reproducible deployments
+- **Deployment**: Terraform modules for reproducible deployments
 - **Configuration**: Systems Manager Parameter Store or AppConfig for runtime settings
 - **Secrets**: AWS Secrets Manager for API keys, cross-account role ARNs
 
@@ -130,7 +132,7 @@ AIOps platform that centralizes AWS signals, applies hybrid anomaly detection, a
 - ✅ Hybrid anomaly detection (statistical + rule-based)
 - ✅ Agentic RCA and recommendations (with human-in-the-loop)
 - ✅ Pluggable AI providers (commercial + self-hosted open-source LLMs)
-- ✅ Rich alerting and interactive chat UI
+- ✅ Rich Slack notifications with interactive chat and OpenSearch dashboard integration
 - ✅ Open-source release with modular architecture
 
 ### Phase 2: Automate (future)
@@ -146,7 +148,7 @@ AIOps platform that centralizes AWS signals, applies hybrid anomaly detection, a
 - **Real-time log search at petabyte scale**: optimized for recent data + alerts, not ad-hoc historical queries.
 
 ## Open-source strategy
-- **License**: Apache 2.0 or MIT for maximum adoption.
+- **License**: MIT for maximum adoption.
 - **Repository structure**: modular components (ingestion, detection, agents, UI) for selective adoption.
 - **Documentation**: architecture diagrams, deployment guides, customization examples, API references.
 - **Community**: contribution guidelines, issue templates, discussion forums.
