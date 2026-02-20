@@ -6,7 +6,7 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 
 **Architecture Principles**:
 - **AWS-native**: Leverage managed services to minimize operational overhead
-- **Serverless-first**: Lambda, Step Functions, and managed data stores where possible
+- **Serverless-first**: Lambda, Fargate, and managed data stores — right tool per workload
 - **Deterministic orchestration**: Workflows are replayable, auditable, and transparent
 - **Pluggable AI**: Support multiple AI providers via unified abstraction layer
 - **Multi-account by design**: Central observability account with cross-account read roles
@@ -19,8 +19,8 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         AWS Accounts (Member)                            │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐            │
-│  │  CloudWatch    │  │  CloudTrail    │  │  VPC Flow Logs │            │
-│  │  Logs/Metrics  │  │  Events        │  │  ALB/RDS/EKS   │            │
+│  │  CloudWatch    │  │  CloudTrail    │  │  ALB/RDS/EKS   │            │
+│  │  Logs/Metrics  │  │  Events        │  │  Lambda Logs   │            │
 │  └────────┬───────┘  └────────┬───────┘  └────────┬───────┘            │
 │           │                   │                   │                      │
 │           └───────────────────┴───────────────────┘                      │
@@ -32,7 +32,7 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 └───────────────────────────────┼──────────────────────────────────────────┘
                                 │
                     Cross-Account Transport
-                    (Kinesis Firehose, EventBridge)
+                    (Kinesis Firehose)
                                 │
 ┌───────────────────────────────▼──────────────────────────────────────────┐
 │                   Central Observability Account (eu-central-1)            │
@@ -46,27 +46,23 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 │  │                                 │                              │        │
 │  │                         ┌───────▼───────┐                      │        │
 │  │                         │ OpenSearch    │◀─── Search/Viz       │        │
-│  │                         │ Serverless    │                      │        │
+│  │                         │ Serverless    │     Logs + Metrics   │        │
 │  │                         └───────────────┘                      │        │
 │  │                                                                │        │
-│  │  ┌───────────────┐      ┌───────────────┐                     │        │
-│  │  │ EventBridge   │─────▶│ DynamoDB      │                     │        │
-│  │  │ Events        │      │ Events Store  │                     │        │
-│  │  └───────────────┘      └───────────────┘                     │        │
-│  │                                                                │        │
-│  │  ┌───────────────┐      ┌───────────────┐                     │        │
-│  │  │ CloudWatch    │─────▶│ Timestream    │                     │        │
-│  │  │ Cross-Account │      │ Metrics       │                     │        │
-│  │  └───────────────┘      └───────────────┘                     │        │
+│  │                         ┌───────────────┐                      │        │
+│  │                         │ DynamoDB      │◀─── Events/State     │        │
+│  │                         │ Tables        │                      │        │
+│  │                         └───────────────┘                      │        │
 │  └────────────────────────────────────────────────────────────────┘        │
 │                                                                            │
 │  ┌───────────────────── Detection Layer ──────────────────────────┐       │
 │  │                                                                 │       │
 │  │  ┌─────────────────────────────────────────────────────┐       │       │
-│  │  │  Statistical Detectors (SageMaker / Lambda)         │       │       │
-│  │  │  • Seasonality baselines (STL decomposition)        │       │       │
-│  │  │  • Change-point detection (PELT algorithm)          │       │       │
-│  │  │  • Z-score / EWMA anomaly scoring                   │       │       │
+│  │  │  Statistical Detectors (Fargate Scheduled Task)     │       │       │
+│  │  │  • Runs every 5 min via EventBridge Scheduler       │       │       │
+│  │  │  • Queries OpenSearch for 7-day baselines           │       │       │
+│  │  │  • STL decomposition, PELT, Z-score/EWMA           │       │       │
+│  │  │  • Iterates all services/metrics in single run      │       │       │
 │  │  └───────────────────────┬─────────────────────────────┘       │       │
 │  │                          │                                      │       │
 │  │  ┌───────────────────────▼─────────────────────────────┐       │       │
@@ -83,18 +79,21 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 │  │                  └────────────────┘                             │       │
 │  └─────────────────────────────────────────────────────────────────┘       │
 │                                                                            │
-│  ┌────────────────── Agentic Orchestration (Step Functions) ──────────┐   │
+│  ┌────────── Agentic Orchestration (Orchestrator Lambda) ────────────┐   │
 │  │                                                                     │   │
+│  │  Triggered by: DynamoDB Stream on anomalies table                 │   │
+│  │                                                                     │   │
+│  │  Pipeline (sequential in single Lambda invocation):               │   │
 │  │  Anomaly → [Detection Agent] → [Correlation Agent] →               │   │
 │  │            [Historical Compare] → [RCA Agent] →                    │   │
-│  │            [Recommendation Agent] → Alert Payload                  │   │
+│  │            [Recommendation Agent] → Slack Alert                    │   │
 │  │                                                                     │   │
-│  │  Agent Tasks (Lambda/Fargate):                                     │   │
-│  │  • Deduplicate & suppress noisy anomalies                          │   │
-│  │  • Join infra/app/deploy events across accounts                    │   │
-│  │  • Compare to past incidents/deployments                           │   │
-│  │  • Run pre-defined RCA scenarios (deployment, infra, dependency)   │   │
-│  │  • Map probable cause to runbooks/fixes                            │   │
+│  │  Each agent = Python module with run() interface:                 │   │
+│  │  • detection_agent.run()    — deduplicate, suppress, escalate     │   │
+│  │  • correlation_agent.run()  — join infra/app/deploy events        │   │
+│  │  • historical_agent.run()   — compare to past incidents           │   │
+│  │  • rca_agent.run()          — RCA via Bedrock (pluggable)         │   │
+│  │  • recommendation_agent.run() — map cause to runbooks             │   │
 │  │                                                                     │   │
 │  │  AI Provider Interface (pluggable):                                │   │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │   │
@@ -103,7 +102,7 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 │  │  └──────────────┘  └──────────────┘  └──────────────┘             │   │
 │  │       Per-Agent-Type Selection (from policy config)                │   │
 │  │                                                                     │   │
-│  │  State Store: DynamoDB (agent state, audit logs, workflow history) │   │
+│  │  Audit: DynamoDB (agent state) + S3 (prompt/response logs)        │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                            │
 │  ┌─────────────────────── Alert & UI Layer ───────────────────────┐       │
@@ -144,18 +143,18 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 ### 1. Data Ingestion (Per-Account → Central)
 
 #### **Sources**
-- **CloudWatch Logs**: Application logs, Lambda logs, VPC Flow Logs, ALB/NLB access logs
+- **CloudWatch Logs**: Application logs, Lambda logs, ALB/NLB access logs
 - **CloudWatch Metrics**: EC2, RDS, Lambda, EKS, custom application metrics
-- **CloudTrail**: API activity, IAM/security events, configuration changes
-- **EventBridge**: Deployment events, autoscaling notifications, health checks
+- **CloudTrail**: API activity, IAM/security events, configuration changes, deployment events
 
 #### **Transport Mechanisms**
-- **Logs**: CloudWatch Logs Subscription Filter → Kinesis Data Firehose (cross-account)
+- **Logs + Events**: CloudWatch Logs Subscription Filter → Kinesis Data Firehose (cross-account)
 - **Metrics**: CloudWatch cross-account observability (direct read access)
-- **Events**: EventBridge cross-account event bus rules
+
+CloudTrail writes to CloudWatch Logs, so all events (deployments, autoscaling, config changes) flow through the same Kinesis Firehose pipeline.
 
 #### **Cross-Account IAM**
-- Member accounts assume `ObservabilityWriteRole` (write to Kinesis, EventBridge)
+- Member accounts assume `ObservabilityWriteRole` (write to Kinesis Firehose)
 - Central account assumes `ObservabilityReadRole` per member (read CloudWatch metrics)
 - Least privilege: deny destructive actions, restrict to observability APIs only
 
@@ -167,7 +166,7 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 |------------------|--------------------------|--------------------|----------------------------------|
 | **Raw Logs**     | S3 (Glacier after 7d)    | 90 days (config)   | Audit, replay, cost optimization |
 | **Indexed Logs** | OpenSearch Serverless    | 90 days (config)   | Search, visualization, alerting  |
-| **Metrics**      | Timestream               | 30d hot, 90d cold  | Time-series queries, baselines   |
+| **Metrics**      | OpenSearch Serverless    | 90 days (config)   | Time-series aggregations, baselines |
 | **Events**       | DynamoDB                 | 90 days (TTL)      | Correlation, audit trail         |
 | **Anomalies**    | DynamoDB                 | 90 days (TTL)      | RCA workflow input, dashboards   |
 | **Agent State**  | DynamoDB                 | 30 days (TTL)      | Workflow orchestration, retries  |
@@ -200,7 +199,23 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 
 ### 3. Hybrid Anomaly Detection
 
-#### **Statistical Detection** (SageMaker or Lambda)
+#### **Statistical Detection** (Fargate Scheduled Task)
+
+A single Fargate container runs on a fixed schedule (every 5 minutes via EventBridge Scheduler → ECS RunTask). Each run iterates over all monitored services and metrics, queries OpenSearch for historical baselines, runs detection algorithms, and writes anomalies to DynamoDB.
+
+**Why Fargate over Lambda**:
+- **Heavy dependencies**: STL (`statsmodels`), PELT (`ruptures`), `numpy`/`scipy` exceed Lambda's 250MB unzipped limit
+- **Batch-oriented**: Detection algorithms need full 7-day windows — periodic batch, not event-driven
+- **In-memory efficiency**: Single process iterates all services/metrics, caching OpenSearch connections and shared state within a run
+- **No fan-out complexity**: One container processes everything vs orchestrating hundreds of concurrent Lambdas
+- **Cost**: ~$1-3/month (256 CPU, 512MB, runs 1-2 min every 5 min)
+
+**Container Spec**:
+- **Image**: Python 3.13 with `statsmodels`, `ruptures`, `numpy`, `scipy`, `opensearch-py`, `boto3`
+- **Resources**: 256 CPU units, 512MB memory
+- **Schedule**: EventBridge Scheduler rule, rate(5 minutes)
+- **Networking**: Private subnet, VPC endpoint access to OpenSearch and DynamoDB
+- **Timeout**: 5 minutes (must complete before next scheduled run)
 
 **Algorithms**:
 - **Seasonality Baseline**: STL decomposition (seasonal-trend decomposition)
@@ -212,6 +227,35 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 - Latency percentiles (p50, p95, p99)
 - Request rate (traffic volume)
 - Resource utilization (CPU, memory, disk I/O)
+
+**Detection Loop** (pseudo-code):
+```python
+def run_detection():
+    policies = load_policies_from_dynamodb()
+    os_client = OpenSearch(...)
+
+    for policy in policies:
+        for metric in policy["metrics"]:
+            # Query OpenSearch for 7-day baseline
+            baseline_data = os_client.search(
+                index=f"metrics-{policy['service']}-*",
+                body=build_aggregation_query(metric, window=policy["baseline_window"])
+            )
+
+            # Run STL decomposition
+            trend, seasonal, residual = stl_decompose(baseline_data)
+
+            # Score current value against baseline
+            current = get_current_value(os_client, policy["service"], metric)
+            z_score = compute_z_score(current, residual)
+
+            # Check for change-points
+            change_points = pelt_detect(baseline_data)
+
+            if z_score > policy["sensitivity_threshold"]:
+                anomaly = build_anomaly_object(policy, metric, current, z_score, change_points)
+                write_to_dynamodb(anomaly)
+```
 
 **Configuration** (per policy):
 ```yaml
@@ -250,57 +294,64 @@ detection:
 
 ---
 
-### 4. Agentic Orchestration (Step Functions)
+### 4. Agentic Orchestration (Orchestrator Lambda)
 
-#### **Workflow Definition** (JSON state machine)
+A single **orchestrator Lambda** is triggered by DynamoDB Streams on the anomalies table. It runs the full agentic pipeline sequentially within one invocation. Each agent is a Python module with a `run()` interface — clean separation without service boundaries.
 
-```json
-{
-  "StartAt": "DetectionAgent",
-  "States": {
-    "DetectionAgent": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:...:function:detection-agent",
-      "Next": "CorrelationAgent"
-    },
-    "CorrelationAgent": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:...:function:correlation-agent",
-      "Next": "HistoricalCompareAgent"
-    },
-    "HistoricalCompareAgent": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:...:function:historical-compare-agent",
-      "Next": "RCAAgent"
-    },
-    "RCAAgent": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:...:function:rca-agent",
-      "Next": "RecommendationAgent"
-    },
-    "RecommendationAgent": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:...:function:recommendation-agent",
-      "Next": "FormatAlert"
-    },
-    "FormatAlert": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:...:function:slack-notifier",
-      "End": true
-    }
-  }
-}
+**Why a single Lambda over Step Functions**:
+- **Simpler**: No state machine JSON to maintain, no additional service to manage
+- **Fewer resources**: One Lambda, one IAM role, one CloudWatch log group
+- **Sufficient**: The pipeline is linear (no branching/parallelism), completes in ~10-30 seconds
+- **Auditable**: Structured JSON logging provides the audit trail
+- **Retriable**: DynamoDB Streams provides built-in retry on failure
+- **Migratable**: If branching or parallel execution is needed later, the modular agent interfaces make Step Functions migration straightforward
+
+**Orchestrator Implementation**:
+```python
+def lambda_handler(event, context):
+    anomaly = parse_dynamodb_stream(event)
+
+    # Agent 1: Deduplicate and suppress
+    filtered = detection_agent.run(anomaly)
+    if filtered.suppressed:
+        logger.info("Anomaly suppressed", anomaly_id=anomaly["anomaly_id"])
+        return
+
+    # Agent 2: Correlate with infra/deploy events
+    enriched = correlation_agent.run(filtered)
+
+    # Agent 3: Find similar past incidents
+    history = historical_compare_agent.run(enriched)
+
+    # Agent 4: Root cause analysis (calls Bedrock)
+    rca = rca_agent.run(enriched, history)
+
+    # Agent 5: Map to runbooks and recommendations
+    recommendations = recommendation_agent.run(rca)
+
+    # Send alert
+    slack_notifier.send(rca, recommendations)
+```
+
+**Agent Module Interface**:
+```python
+# Each agent follows this pattern: src/agents/{agent_name}/agent.py
+class BaseAgent(ABC):
+    @abstractmethod
+    def run(self, *args) -> dict:
+        """Execute agent logic, return structured result."""
+        pass
 ```
 
 #### **Agent Responsibilities**
 
-| Agent                     | Input                           | Function                                                           | Output                          | AI Provider | MVP/Phase |
-|---------------------------|---------------------------------|--------------------------------------------------------------------|---------------------------------|-------------|-----------|
-| **Detection Agent**       | Anomaly object                  | Deduplicate, apply suppression rules, decide escalation           | Filtered anomaly                | None        | **MVP**   |
-| **Correlation Agent**     | Filtered anomaly                | Join infra events, deployment events, related anomalies            | Enriched anomaly + context      | Bedrock (optional) | **MVP** |
-| **Historical Compare**    | Enriched anomaly                | Find similar past incidents, compare current vs last deployment    | Similarity scores, past RCAs    | None (query) | **MVP**   |
-| **RCA Agent**             | Anomaly + context + history     | Investigate pre-defined scenarios, generate hypothesis with confidence | Probable root cause + evidence | **Bedrock Claude** | **MVP** |
-| **Recommendation Agent**  | RCA result                      | Map cause to runbooks, suggest next steps                          | Recommendations + links         | Bedrock (optional) | **MVP** |
+| Agent                     | Module                        | Function                                                           | Output                          | AI Provider | MVP/Phase |
+|---------------------------|-------------------------------|--------------------------------------------------------------------|---------------------------------|-------------|-----------|
+| **Detection Agent**       | `agents/detection`            | Deduplicate, apply suppression rules, decide escalation           | Filtered anomaly                | None        | **MVP**   |
+| **Correlation Agent**     | `agents/correlation`          | Join infra events, deployment events, related anomalies            | Enriched anomaly + context      | Bedrock (optional) | **MVP** |
+| **Historical Compare**    | `agents/historical_compare`   | Find similar past incidents, compare current vs last deployment    | Similarity scores, past RCAs    | None (query) | **MVP**   |
+| **RCA Agent**             | `agents/rca`                  | Investigate pre-defined scenarios, generate hypothesis with confidence | Probable root cause + evidence | **Bedrock Claude** | **MVP** |
+| **Recommendation Agent**  | `agents/recommendation`       | Map cause to runbooks, suggest next steps                          | Recommendations + links         | Bedrock (optional) | **MVP** |
 
 #### **RCA Agent Scenarios** (Pre-Defined Investigations)
 
@@ -641,30 +692,31 @@ OpenSearch automatically applies filters to all panels based on URL parameters.
 
 #### **Module: Networking**
 - VPC with private subnets (no public internet access for compute)
-- VPC Endpoints for AWS services (S3, DynamoDB, Secrets Manager, SageMaker)
+- VPC Endpoints for AWS services (S3, DynamoDB, OpenSearch, Secrets Manager)
 - Security groups with least privilege
 
 #### **Module: IAM Roles**
-- `ObservabilityWriteRole` (member accounts) → write to Kinesis/EventBridge
+- `ObservabilityWriteRole` (member accounts) → write to Kinesis Firehose
 - `ObservabilityReadRole` (central account) → read CloudWatch metrics from members
-- `LambdaExecutionRole` → read/write to DynamoDB, S3, OpenSearch, invoke Step Functions
-- `StepFunctionsExecutionRole` → invoke Lambda, write to DynamoDB
+- `LambdaExecutionRole` → read/write to DynamoDB, S3, OpenSearch, invoke Bedrock
+- `FargateTaskRole` → read from OpenSearch, write to DynamoDB (statistical detection)
 
 #### **Module: Data Stores**
 - S3 buckets (raw logs, audit logs) with lifecycle policies
-- OpenSearch Serverless collection with IAM authentication
+- OpenSearch Serverless collection with IAM authentication (indexed logs + metrics)
 - DynamoDB tables: anomalies, events, policy_store, agent_state, audit_logs
-- Timestream database for metrics
 
 #### **Module: Compute**
-- Lambda functions (normalization, detection, agents, Slack notifier)
-- Step Functions state machine (agentic orchestration)
+- Lambda functions: normalization, rule-based detection, orchestrator (agentic pipeline), Slack notifier
+- DynamoDB Stream trigger on anomalies table → orchestrator Lambda
+- Fargate task definition + ECS cluster (statistical anomaly detection)
+- EventBridge Scheduler rule (triggers Fargate detection task every 5 minutes)
 - (Optional) SageMaker endpoint for self-hosted LLM
 
 #### **Module: Observability**
-- CloudWatch Logs for Lambda
-- CloudWatch Alarms for cost caps, error rates
-- X-Ray tracing for Step Functions workflows
+- CloudWatch Logs for Lambda and Fargate tasks
+- CloudWatch Alarms for cost caps, error rates, detection task failures
+- X-Ray tracing for orchestrator Lambda
 
 ### **Deployment Steps** (MVP)
 
@@ -676,7 +728,7 @@ terraform apply -target=module.networking -target=module.iam
 # 2. Deploy data stores
 terraform apply -target=module.data_stores
 
-# 3. Deploy compute (Lambda, Step Functions)
+# 3. Deploy compute (Lambda, Fargate)
 terraform apply -target=module.compute
 
 # 4. Deploy OpenSearch dashboards (import saved objects)
@@ -714,16 +766,16 @@ terraform apply \
 
 ### **Step 1: Ingestion** (T+0 seconds)
 - API Gateway logs show 500ms+ response times
-- CloudWatch Logs → Subscription Filter → Kinesis Firehose → S3 + Lambda
+- CloudWatch Logs → Subscription Filter → Kinesis Firehose → Lambda
 
 ### **Step 2: Normalization** (T+5 seconds)
 - Lambda parses logs, enriches with deployment metadata
-- Writes to OpenSearch: `{"timestamp": "...", "service": "api-gateway", "p95_latency_ms": 1200, ...}`
+- Writes to S3 (raw) + OpenSearch (indexed): `{"timestamp": "...", "service": "api-gateway", "p95_latency_ms": 1200, ...}`
 
-### **Step 3: Detection** (T+30 seconds)
-- Statistical detector queries Timestream: "p95_latency_ms for api-gateway, last 7 days"
+### **Step 3: Detection** (next scheduled run, within 5 minutes)
+- Fargate statistical detector queries OpenSearch aggregations: "p95_latency_ms for api-gateway, last 7 days"
 - Baseline = 150ms, current = 1200ms, z-score = 5.2 → ANOMALY
-- Writes to DynamoDB anomalies table, triggers Step Functions
+- Writes to DynamoDB anomalies table, triggers orchestrator Lambda via DynamoDB Stream
 
 ### **Step 4: Agentic Workflow** (T+30s to T+2min)
 1. **Detection Agent**: Checks for duplicate anomalies (none found), passes through
@@ -744,7 +796,7 @@ terraform apply \
 - Confirms RCA hypothesis by drilling into slow query logs
 - Executes rollback or query optimization
 
-**Total Time: Anomaly detection → Alert in engineer's hands = <2 minutes**
+**Total Time: Anomaly detection → Alert in engineer's hands = <7 minutes** (up to 5 min detection interval + ~2 min agentic workflow)
 
 ---
 
@@ -757,8 +809,8 @@ terraform apply \
 |------|-------------|
 | 1-2  | Infrastructure setup (Terraform, IAM, S3, DynamoDB, OpenSearch) |
 | 3-4  | Ingestion pipeline (CloudWatch → Kinesis → Lambda → OpenSearch) |
-| 5    | Statistical anomaly detection (Lambda + Timestream queries) |
-| 6    | Step Functions orchestration + Detection/Correlation agents |
+| 5    | Statistical anomaly detection (Fargate scheduled task + OpenSearch aggregation queries) |
+| 6    | Orchestrator Lambda + Detection/Correlation agents |
 | 7    | RCA Agent with Bedrock Claude integration |
 | 8    | Slack notifier + 3 OpenSearch dashboards |
 
@@ -795,7 +847,7 @@ terraform apply \
 ## Operational Considerations
 
 ### **Monitoring & Alerting**
-- **Pipeline health**: CloudWatch alarms on Lambda errors, Step Functions failures
+- **Pipeline health**: CloudWatch alarms on Lambda errors, Fargate task failures, orchestrator Lambda failures
 - **Data lag**: Alert if OpenSearch indexing lag > 5 minutes
 - **Cost**: Daily budget alerts on AI provider spend, S3/OpenSearch usage
 - **RCA accuracy**: Track confidence vs engineer validation (Phase 2 feedback loop)
@@ -811,7 +863,7 @@ terraform apply \
 - **Audit trail**: All AI prompts/responses logged to S3 for compliance
 
 ### **Cost Optimization**
-- **Compute**: Lambda scales to zero, Step Functions pay-per-transition
+- **Compute**: Lambda scales to zero (pay-per-invocation), Fargate pay-per-second (~$1-3/month for detection)
 - **Storage**: S3 Intelligent-Tiering for raw logs, OpenSearch Serverless pay-per-use
 - **AI providers**: Per-agent cost caps, option to use self-hosted LLMs for high-volume tasks
 
@@ -821,11 +873,11 @@ terraform apply \
 
 | Layer              | Technology                          | Rationale                                       |
 |--------------------|-------------------------------------|-------------------------------------------------|
-| **Ingestion**      | Kinesis Firehose, EventBridge       | Managed, scalable, cross-account support        |
-| **Storage**        | S3, OpenSearch Serverless, Timestream, DynamoDB | Purpose-built for logs, metrics, events        |
-| **Compute**        | Lambda, Step Functions              | Serverless, cost-effective, zero ops overhead   |
-| **Detection**      | Lambda (rules), SageMaker (ML)      | Flexible, supports custom algorithms            |
-| **Orchestration**  | Step Functions                      | Visual workflows, retries, auditability         |
+| **Ingestion**      | Kinesis Firehose                    | Managed, scalable, cross-account support        |
+| **Storage**        | S3, OpenSearch Serverless, DynamoDB | Logs + metrics in OpenSearch, events/state in DynamoDB |
+| **Compute**        | Lambda, Fargate                     | Serverless, cost-effective, right tool per workload |
+| **Detection**      | Fargate (statistical), Lambda (rules) | Fargate for heavy ML libs, Lambda for lightweight thresholds |
+| **Orchestration**  | Orchestrator Lambda + DynamoDB Stream | Simple linear pipeline, no extra service overhead |
 | **AI Provider**    | AWS Bedrock (MVP), pluggable        | Multi-model support, easy to extend             |
 | **Dashboards**     | OpenSearch Dashboards               | Built-in, powerful, no custom UI needed         |
 | **Notifications**  | Slack API (Lambda)                  | Simple webhook, rich formatting                 |

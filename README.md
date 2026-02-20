@@ -52,8 +52,6 @@ The AIOps Platform autonomously **investigates anomalies before alerting you**, 
 | [Product Summary](./docs/1-product-summary.md) | Vision, capabilities, architecture principles |
 | [UX Requirements](./docs/2-requirements-ux.md) | User workflows, personas, and feature rollout |
 | [Solution Design](./docs/3-solution-design.md) | Architecture diagrams and component details |
-| [MVP Development Plan](./docs/mvp-development-plan.md) | 6-step implementation plan |
-| [Local Development](./docs/local-development.md) | **NEW!** Setup guide for AWS Bedrock and local testing |
 | [Terraform Guide](./terraform/README.md) | Infrastructure deployment instructions |
 | [Features Roadmap](./FEATURES.md) | Current and planned capabilities |
 

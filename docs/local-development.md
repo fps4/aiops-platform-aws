@@ -230,6 +230,5 @@ ThrottlingException: Rate exceeded
 
 ## Next Steps
 
-- See [3-solution-design.md](3-solution-design.md) for agent architecture
-- Review [mvp-development-plan.md](mvp-development-plan.md) for Step 1.2+ implementation
+- See [solution-design.md](solution-design.md) for agent architecture
 - Check [FEATURES.md](../FEATURES.md) for AI/ML capabilities roadmap

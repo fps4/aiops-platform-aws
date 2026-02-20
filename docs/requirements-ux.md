@@ -147,7 +147,7 @@ detection_policies:
 
 ## Phased Feature Rollout
 
-### MVP (Minimum Viable Product)
+### MVP
 **Goal**: Prove value with proactive RCA alerts and basic investigation tools.
 
 **Included**:

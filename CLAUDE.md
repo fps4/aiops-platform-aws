@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AWS-native AIOps platform: serverless observability control plane that ingests signals from multiple AWS accounts, applies hybrid anomaly detection (statistical + rule-based), orchestrates agentic RCA workflows via Step Functions, and delivers Slack alerts with OpenSearch dashboard links.
+AWS-native AIOps platform: serverless observability control plane that ingests signals from multiple AWS accounts, applies hybrid anomaly detection (statistical + rule-based), orchestrates agentic RCA workflows via an orchestrator Lambda, and delivers Slack alerts with OpenSearch dashboard links.
 
 **Region**: eu-central-1 (single-region, all resources). **Python 3.13+**. **Terraform >= 1.5**.
 
@@ -46,18 +46,18 @@ scripts/load-policies.sh --file policies/default-policies.yaml
 
 ### Data Flow
 ```
-Member AWS Accounts → CloudWatch Logs → Subscription Filter → Kinesis Firehose → S3 (raw)
-  → Lambda (log-normalizer) → OpenSearch Serverless (indexed)
-  → Lambda (metrics) → Timestream (1-min granularity)
-  → EventBridge → Lambda (event-processor) → DynamoDB events table
+Member AWS Accounts → CloudWatch Logs → Subscription Filter → Kinesis Firehose
+  → Lambda (log-normalizer) → S3 (raw) + OpenSearch Serverless (indexed logs + metrics)
+  CloudTrail → CloudWatch Logs → same Kinesis Firehose pipeline
 ```
 
 ### Anomaly Detection → RCA Pipeline
 ```
-Timestream metrics → Statistical detection (STL baseline, Z-score, PELT changepoint)
-                   → Rule-based detection (error rate, latency, security)
+OpenSearch metrics → Fargate scheduled task (every 5 min):
+                     STL baseline, Z-score, PELT changepoint
+                   → Rule-based detection via Lambda (error rate, latency, security)
                    → DynamoDB anomalies table → DynamoDB Stream
-                   → Step Functions workflow:
+                   → Orchestrator Lambda (sequential agent pipeline):
                      DetectionAgent → CorrelationAgent → HistoricalCompareAgent →
                      RCAAgent (Bedrock Claude) → RecommendationAgent → SlackNotifier
 ```
@@ -91,7 +91,7 @@ Timestream metrics → Statistical detection (STL baseline, Z-score, PELT change
 | policy_store | policy_id | - |
 | agent_state | workflow_id | step_name |
 
-All tables use `ttl` attribute (Unix timestamp) for expiration. Streams enabled on `anomalies` to trigger Step Functions.
+All tables use `ttl` attribute (Unix timestamp) for expiration. Streams enabled on `anomalies` to trigger orchestrator Lambda.
 
 ### Detection Policies (YAML)
 Loaded via `scripts/load-policies.sh` into DynamoDB. Schema: scope (accounts, services) + detection config (type, metric, sensitivity, threshold) + actions (alert, run_rca, agent_provider, suppression).
@@ -99,14 +99,9 @@ Loaded via `scripts/load-policies.sh` into DynamoDB. Schema: scope (accounts, se
 ### Canonical Log Schema
 All logs normalized to: `{timestamp, account_id, region, service, environment, log_level, message, deployment_version, deployment_timestamp, related_events}`.
 
-## MVP Implementation
-
-Follow `docs/mvp-development-plan.md` sequentially (Steps 1-6). Step 1.1 (IAM + data-stores Terraform modules) is complete. Current work: Step 1.2 (compute, member-account, secrets, observability modules).
-
 ## Important Rules
 
 - Never modify the canonical log schema without migrating existing OpenSearch indices
-- Never modify Step Functions workflow JSON without updating `src/orchestration/step-functions/anomaly-workflow.json`
 - Never add Lambda dependencies without updating the corresponding `requirements.txt` and rebuilding the deployment zip
 - Always load detection policies via YAML -> DynamoDB (never hardcode in Lambda)
 - Use IAM roles for all AWS auth (never hardcoded credentials)

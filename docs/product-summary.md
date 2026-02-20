@@ -7,11 +7,11 @@ Agentic AIOps platform that centralizes AWS signals, applies hybrid anomaly dete
 **Current scope**: Observe and Engage features (Automate deferred to future phases).
 
 ## What it is
-- A multi-account, cloud-native observability control plane with centralized data + deterministic orchestration.
+- A multi-account, cloud-native observability control plane with centralized data and deterministic orchestration.
 - Hybrid detection (statistical, rule-based) with LLM-assisted summarization/correlation, not LLM-first detection.
 - Agentic workflow that turns anomalies into RCA, recommendations, and actionable alerts.
 
-## Who it’s for
+## Who it's for
 - **Platform/SRE teams**: implement and customize the platform for their organization; own ingestion, governance, detection policies, orchestration, and cost controls; consume alerts, insights, and recommendations.
 - **Open-source contributors**: extend detection algorithms, add integrations, improve agentic workflows, and share best practices.
 
@@ -20,137 +20,89 @@ Agentic AIOps platform that centralizes AWS signals, applies hybrid anomaly dete
 - **Centralize signals, not intelligence**: keep processing near data on AWS.
 - **Deterministic first**: LLMs augment explanation/correlation, not replace rule-based detection.
 - **Structured outputs**: provide confidence scores and evidence trails; no free-form actions.
-- **Pluggable AI**: support commercial APIs (AWS Bedrock, OpenAI, Anthropic) AND self-hosted open-source LLMs (Llama, Mistral, etc.) behind a unified provider interface.
+- **Pluggable AI**: support commercial and self-hosted open-source LLMs behind a unified provider interface.
 - **Open by default**: modular, extensible architecture that platform teams can adapt to their specific needs.
 - **Privacy-conscious**: support airgapped/self-hosted LLM deployments for sensitive environments.
 
 ## Core capabilities
-### Ingestion (per account → central)
-- CloudWatch Logs/Metrics, CloudTrail, VPC Flow Logs, ALB/RDS/EKS/Lambda logs.
-- Transport: CloudWatch Logs subscription filters → Kinesis Firehose; EventBridge bus for events; cross-account IAM roles.
 
-### Storage (central observability account)
-| Signal         | Storage                                   |
-| -------------- | ----------------------------------------- |
-| Logs (raw)     | S3 (partitioned by account/service/date)  |
-| Logs (indexed) | OpenSearch                                |
-| Metrics        | CloudWatch cross-account + Timestream     |
-| Events         | EventBridge + DynamoDB                    |
-| Traces         | X-Ray / OpenTelemetry (optional)          |
-
-### Normalization & enrichment
-- Canonical schema; add account_id, region, service, deployment/version, environment.
-- Deduplicate noisy events; aggregate p50/p95/p99; create an “observability feature store” for ML.
+### Multi-account signal ingestion
+- Collect logs, metrics, and API activity from multiple AWS accounts into a central observability account.
+- Supported sources: application logs, infrastructure metrics, API audit trails, load balancer and database logs.
+- Automatic normalization to a canonical schema with account, region, service, environment, and deployment metadata.
+- Deduplication of noisy events; aggregation of key percentiles (p50/p95/p99).
 
 ### Hybrid anomaly detection
-- Statistical/ML: seasonality baselines, change-point detection, z-score/EWMA/STL by service/account.
-- Rule-based guardrails: error-rate, latency regression, traffic drops, security events.
-- LLM-assisted semantic signals: “new error pattern” / “rare log message”; used for explanation or secondary scoring.
-- Output: structured anomaly object (signal, scope, deviation, baseline, confidence, related events).
+- **Statistical detection**: seasonality baselines (STL decomposition), change-point detection (PELT), z-score/EWMA scoring per service and account.
+- **Rule-based guardrails**: hard thresholds for error rates, latency regressions, traffic drops, and security events.
+- **LLM-assisted semantic signals**: detect new error patterns and rare log messages; used for explanation or secondary scoring.
+- **Output**: structured anomaly objects with signal, scope, deviation, baseline, confidence, and related events.
+- **Configurable policies**: per-service sensitivity, baseline windows, cooldown periods, and suppression rules.
 
-### Agentic reasoning (deterministic orchestration) - **Engage scope**
-- **Detection agent**: consume anomalies, dedupe, suppress noise, decide escalation.
-- **Correlation agent**: join infra/app/deploy events across accounts; build causal hints.
-- **Historical comparison agent**: last week/deploy/incident similarity.
-- **RCA agent** (LLM-flexible): summarizes evidence, proposes probable cause with confidence + links.
-- **Recommendation/runbook agent**: maps RCA to known fixes, links to runbooks/documentation/ticketing systems.
+### Agentic reasoning (Engage)
+- **Detection agent**: consume anomalies, deduplicate, apply suppression rules, decide escalation.
+- **Correlation agent**: join infrastructure, application, and deployment events across accounts; build causal hints.
+- **Historical comparison agent**: find similar past incidents, compare to last deployment or last week.
+- **RCA agent**: summarize evidence, propose probable root cause with confidence scores and supporting links.
+- **Recommendation/runbook agent**: map root cause to known fixes, link to runbooks and documentation.
 - **Interactive chat agent**: natural language Q&A over observability data for on-call engineers.
 
-**Note**: Autonomous remediation (Automate) is explicitly out of scope for initial release; all actions require human approval.
+All actions require human approval — autonomous remediation is out of scope for Phase 1.
 
-### Orchestration & control plane
-- Orchestrator: AWS Step Functions or Temporal; deterministic, replayable, observable, auditable.
+### Deterministic orchestration
+- Replayable, auditable, and observable workflow pipeline.
 - Flow: Anomaly → Correlate → Compare → RCA → Recommend → Alert.
 - Policy store for detection thresholds, escalation rules, cost limits, and AI provider selection.
 
-### AI/LLM layer (pluggable & open)
-- **Roles**: summarization, semantic clustering, RCA explanation, hypothesis generation, natural language alerting, interactive Q&A.
-- **Anti-patterns**: raw log ingestion, real-time gating, acting without confidence, autonomous remediation (out of scope).
-- **Provider abstraction**: unified interface supporting:
-  - **Commercial APIs**: AWS Bedrock (Claude, Titan, etc.), OpenAI, Anthropic, Azure OpenAI
-  - **Self-hosted open-source LLMs**: Llama 3/4, Mistral, Qwen, DeepSeek, etc.
-- **Deployment options for self-hosted models**:
-  - **SageMaker Real-Time Endpoints**: managed inference with autoscaling, multi-model endpoints, GPU instance support
-  - **SageMaker Serverless Inference**: pay-per-use for infrequent usage patterns
-  - **EKS with GPU nodes**: full control, node autoscaling, spot instances for cost optimization
-  - **ECS/Fargate with Inferentia/Graviton**: AWS-optimized inference chips for cost-effective deployment
-- **Multi-tenancy support**: per-account provider selection; cost allocation tags.
-- **Privacy & security**: keep sensitive data in-account with self-hosted models; PII redaction before external API calls; comprehensive prompt/response audit logging.
-- **Model registry**: track model versions, performance metrics, and cost per provider; enable A/B testing and gradual rollouts.
+### Pluggable AI providers
+- **Unified provider interface** supporting per-agent model selection.
+- **Commercial APIs**: AWS Bedrock, OpenAI, Anthropic.
+- **Self-hosted open-source LLMs**: Llama, Mistral, Qwen, DeepSeek, and others.
+- **AI roles**: summarization, semantic clustering, RCA explanation, hypothesis generation, natural language alerting.
+- **Anti-patterns**: raw log ingestion, real-time gating, acting without confidence.
+- **Cost controls**: per-agent cost caps, budget alarms, cost allocation per account/service.
+- **Privacy**: keep sensitive data in-account with self-hosted models; PII redaction before external API calls; full prompt/response audit trail.
 
-### Alerting & UX - **Engage scope**
-- **Rich alert payload**: what happened, why we think it happened, what changed, confidence score, what to do next (links to OpenSearch dashboards/runbooks).
-- **Primary interface**: Slack for notifications and interactive chat with natural language queries over observability data.
-- **Notification format**: 
-  - Structured message with RCA summary, confidence score, and context
-  - Direct link to OpenSearch dashboard for detailed investigation
-  - Screenshot of relevant visualization (if feasible with OpenSearch APIs)
-- **Dashboards**: AWS OpenSearch UI for timeline views, evidence exploration, and drill-down into logs/metrics/traces.
-- **Feedback loop**: Slack reactions (👍/👎) on RCA quality to improve models.
-- **Additional channels**: Microsoft Teams, OpsGenie, PagerDuty, SNS, email with similar rich payloads.
-- **Extensible integrations**: plugin architecture for custom notification/ticketing systems.
+### Alerting & UX (Engage)
+- **Rich alert payload**: what happened, why it happened, what changed, confidence score, and recommended next steps.
+- **Primary interface**: Slack notifications with interactive chat and natural language queries.
+- **Dashboards**: unified incident timeline, anomaly detection results, and RCA evidence explorer with drill-down into logs and metrics.
+- **Deep-linking**: alerts link directly to pre-filtered dashboards for the affected service and timeframe.
+- **Feedback loop**: reactions on RCA quality to improve models over time.
+- **Additional channels**: Microsoft Teams, OpsGenie, PagerDuty, SNS, email.
+- **Extensible**: plugin architecture for custom notification and ticketing integrations.
 
 ### Security, trust, cost
-- Cross-account read-only roles; least privilege.
-- Data minimization for prompts; redact sensitive fields; store prompt/decision audit trail.
-- Human-in-the-loop for actions; cost caps per account/service; budget alarms on LLM usage.
-
-## Deployment footprint (AWS-native)
-### Data plane (Observe)
-- **Ingestion**: CloudWatch Logs subscription filters, Kinesis Data Firehose, EventBridge, CloudTrail
-- **Storage**: S3 (raw logs, partitioned), OpenSearch Serverless (indexed logs), Timestream (metrics), DynamoDB (events/metadata)
-- **Optional**: X-Ray or OpenTelemetry Collector for distributed tracing
-
-### Compute & processing
-- **Normalization/enrichment**: Lambda (event-driven) or Fargate (streaming)
-- **Anomaly detection**: SageMaker (statistical/ML models) or Lambda (rule-based)
-- **Agentic workflows**: Step Functions (serverless orchestration) or ECS/Fargate (long-running agents)
-
-### Control plane (Engage)
-- **API layer**: API Gateway + Lambda or Application Load Balancer + ECS (for Slack bot and webhook handlers)
-- **State management**: DynamoDB (policy store, agent state, audit logs)
-- **Orchestration**: Step Functions for workflow coordination
-- **Dashboards**: AWS OpenSearch Dashboards (built-in) for visualization and exploration
-
-### AI/LLM infrastructure
-- **Commercial**: AWS Bedrock (managed, multi-model), API clients for OpenAI/Anthropic
-- **Self-hosted open-source**:
-  - SageMaker endpoints (real-time or serverless) with autoscaling
-  - EKS cluster with GPU node groups (g5/p4 instances) + Karpenter for autoscaling
-  - ECS/Fargate with Inferentia2 instances for cost-optimized inference
-  - Model artifacts stored in S3; served via TorchServe, vLLM, or TensorRT-LLM
-- **Model management**: SageMaker Model Registry or custom metadata store
-
-### Infrastructure as Code
-- **Deployment**: Terraform modules for reproducible deployments
-- **Configuration**: Systems Manager Parameter Store or AppConfig for runtime settings
-- **Secrets**: AWS Secrets Manager for API keys, cross-account role ARNs
+- Cross-account read-only roles with least privilege.
+- Data minimization for AI prompts; redact sensitive fields; store prompt/decision audit trail.
+- Human-in-the-loop for all actions; cost caps per account/service; budget alarms on AI usage.
 
 ## Phasing & roadmap
+
 ### Phase 1: Observe + Engage (current scope)
-- ✅ Multi-account log/metric/event ingestion
-- ✅ Hybrid anomaly detection (statistical + rule-based)
-- ✅ Agentic RCA and recommendations (with human-in-the-loop)
-- ✅ Pluggable AI providers (commercial + self-hosted open-source LLMs)
-- ✅ Rich Slack notifications with interactive chat and OpenSearch dashboard integration
-- ✅ Open-source release with modular architecture
+- Multi-account log/metric/event ingestion
+- Hybrid anomaly detection (statistical + rule-based)
+- Agentic RCA and recommendations (with human-in-the-loop)
+- Pluggable AI providers (commercial + self-hosted open-source LLMs)
+- Rich Slack notifications with interactive chat and dashboard integration
+- Open-source release with modular architecture
 
 ### Phase 2: Automate (future)
-- 🔲 Autonomous remediation workflows (rollback, scale, config changes)
-- 🔲 Change management integration (approval workflows, blast radius limits)
-- 🔲 Closed-loop feedback (measure remediation effectiveness)
-- 🔲 Progressive automation (shadow mode → assisted → autonomous)
+- Autonomous remediation workflows (rollback, scale, config changes)
+- Change management integration (approval workflows, blast radius limits)
+- Closed-loop feedback (measure remediation effectiveness)
+- Progressive automation (shadow mode → assisted → autonomous)
 
-## Non-goals (for Phase 1)
+## Non-goals (Phase 1)
 - **Autonomous remediation**: all actions require explicit human approval.
 - **On-prem deployment**: AWS-native architecture; hybrid-cloud support deferred.
 - **Deep APM features**: basic trace ingestion only; not replacing full APM solutions.
-- **Real-time log search at petabyte scale**: optimized for recent data + alerts, not ad-hoc historical queries.
+- **Real-time log search at petabyte scale**: optimized for recent data and alerts, not ad-hoc historical queries.
 
 ## Open-source strategy
 - **License**: MIT for maximum adoption.
 - **Repository structure**: modular components (ingestion, detection, agents, UI) for selective adoption.
 - **Documentation**: architecture diagrams, deployment guides, customization examples, API references.
 - **Community**: contribution guidelines, issue templates, discussion forums.
-- **Reference implementations**: sample deployments for common AWS architectures (EKS-heavy, serverless-first, multi-region).
+- **Reference implementations**: sample deployments for common AWS architectures.
 - **Extensibility points**: plugin interfaces for custom detectors, notification channels, and AI providers.

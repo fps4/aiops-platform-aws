@@ -19,20 +19,18 @@ Building the foundation for proactive anomaly detection and RCA.
 |---------|--------|-------------|
 | Multi-Account CloudWatch Logs Ingestion | 🚧 | Ingest logs from 50+ AWS accounts via Kinesis Firehose |
 | CloudWatch Metrics Cross-Account | 🚧 | Read metrics from member accounts using cross-account IAM |
-| CloudTrail Event Ingestion | 🚧 | Capture API activity, IAM changes, config modifications |
-| EventBridge Cross-Account Bus | 🚧 | Receive deployment events, health checks, autoscaling notifications |
+| CloudTrail Event Ingestion | 🚧 | Capture API activity, IAM changes, config modifications via CloudWatch Logs pipeline |
 | S3 Raw Log Storage | 🚧 | Partitioned by account/service/date with lifecycle policies |
-| OpenSearch Serverless Indexing | 🚧 | Index normalized logs for search and visualization |
-| Timestream Metrics Storage | 🚧 | Time-series database for metrics with hot/cold tiers |
+| OpenSearch Serverless Indexing | 🚧 | Index normalized logs and metrics for search, visualization, and time-series aggregations |
 | DynamoDB Event Store | 🚧 | Store deployment events, anomalies, agent state |
 
 ### Anomaly Detection
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Statistical Baseline Detection | 🚧 | STL decomposition for seasonality patterns |
-| Change-Point Detection | 🚧 | PELT algorithm to detect sudden metric shifts |
-| Z-Score Anomaly Scoring | 🚧 | Standard deviation-based scoring with sliding windows |
-| EWMA Anomaly Scoring | 🚧 | Exponentially weighted moving average for trend detection |
+| Statistical Baseline Detection | 🚧 | STL decomposition for seasonality patterns (Fargate scheduled task) |
+| Change-Point Detection | 🚧 | PELT algorithm to detect sudden metric shifts (Fargate scheduled task) |
+| Z-Score Anomaly Scoring | 🚧 | Standard deviation-based scoring with sliding windows (Fargate scheduled task) |
+| EWMA Anomaly Scoring | 🚧 | Exponentially weighted moving average for trend detection (Fargate scheduled task) |
 | Rule-Based Error Rate Alerts | 🚧 | Threshold-based alerts for error rates >5% |
 | Rule-Based Latency Regression | 🚧 | Detect latency >2x baseline for 3+ minutes |
 | Rule-Based Traffic Drop Detection | 🚧 | Alert on >80% traffic drop (canary failure detection) |
@@ -51,7 +49,7 @@ Building the foundation for proactive anomaly detection and RCA.
 | RCA Agent - Resource Exhaustion | 🚧 | Identify OOM, throttling, disk space issues |
 | RCA Agent - Security/Access Issues | 🚧 | Analyze IAM, security group, network ACL changes |
 | Recommendation Agent | 🚧 | Map probable cause to known fixes and runbooks |
-| Step Functions Orchestration | 🚧 | Deterministic, replayable workflow coordination |
+| Orchestrator Lambda | 🚧 | Single Lambda triggered by DynamoDB Stream, runs full agent pipeline sequentially |
 
 ### AI Provider Integration
 | Feature | Status | Description |
@@ -79,6 +77,7 @@ Building the foundation for proactive anomaly detection and RCA.
 |---------|--------|-------------|
 | Terraform Modular Architecture | 🚧 | Reusable modules for networking, IAM, data stores, compute |
 | Single-Region Deployment (eu-central-1) | 🚧 | MVP deployed to single region for simplicity |
+| Fargate Scheduled Detection Task | 🚧 | ECS Fargate task for statistical detection, triggered every 5 min via EventBridge Scheduler |
 | Lambda-Based Slack Bot | 🚧 | Serverless webhook handler for notifications |
 | Cross-Account IAM Roles | 🚧 | Least-privilege read-only roles for member accounts |
 | DynamoDB Policy Store | 🚧 | Store detection policies loaded from YAML files |
