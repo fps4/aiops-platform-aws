@@ -2,9 +2,10 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 # ── Configuration (override via env or CLI: make deploy ENV=staging) ──────────
-ENV            ?= dev
-AWS_REGION     ?= eu-central-1
-PROJECT_PREFIX ?= aiops
+ENV                ?= dev
+AWS_REGION         ?= eu-central-1
+PROJECT_PREFIX     ?= aiops
+FARGATE_PLATFORM   ?= linux/amd64
 
 # ── Source paths ──────────────────────────────────────────────────────────────
 SRC_SHARED         := src/shared
@@ -85,11 +86,14 @@ build-fargate: ## Build and push Fargate detection image to ECR (run after tf-ap
 	@echo "→ Authenticating with ECR ($(ECR_REGISTRY))..."
 	aws ecr get-login-password --region $(AWS_REGION) | \
 	  docker login --username AWS --password-stdin $(ECR_REGISTRY)
-	@echo "→ Building $(ECR_REPO):latest ..."
-	docker build -t $(ECR_REPO):latest -f $(FARGATE_DOCKERFILE) src/
-	@echo "→ Pushing..."
-	docker push $(ECR_REPO):latest
-	@echo "  ✓ Fargate image pushed"
+	@echo "→ Building $(FARGATE_PLATFORM) image and pushing to $(ECR_REPO):latest ..."
+	docker buildx build \
+	  --platform $(FARGATE_PLATFORM) \
+	  -t $(ECR_REPO):latest \
+	  -f $(FARGATE_DOCKERFILE) \
+	  --push \
+	  src/
+	@echo "  ✓ Fargate image pushed ($(FARGATE_PLATFORM))"
 
 # ── Terraform ─────────────────────────────────────────────────────────────────
 

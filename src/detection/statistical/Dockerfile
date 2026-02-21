@@ -8,9 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ && rm -
 COPY detection/statistical/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY detection/statistical/main.py detection/statistical/algorithms.py ./
-COPY shared/ ./shared/
+# Copy full source tree so Python package paths resolve
+COPY . /app/src
 
+# Add project root to PYTHONPATH so `src.*` namespace is found
 ENV PYTHONPATH=/app
+WORKDIR /app
 
-CMD ["python", "main.py"]
+# Run via module to ensure package imports work
+CMD ["python", "-m", "src.detection.statistical.main"]
