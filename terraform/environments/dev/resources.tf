@@ -1,3 +1,19 @@
+# Auto-discover default VPC subnets for Fargate (used when fargate_subnet_ids not set in tfvars)
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default_public" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+  filter {
+    name   = "defaultForAz"
+    values = ["true"]
+  }
+}
+
 # IAM Module
 module "iam" {
   source = "../../modules/iam"
@@ -49,7 +65,7 @@ module "compute" {
   events_table_name           = module.data_stores.events_table_name
   slack_webhook_secret_arn    = aws_secretsmanager_secret.slack_webhook.arn
   aws_region                  = var.aws_region
-  fargate_subnet_ids          = var.fargate_subnet_ids
+  fargate_subnet_ids          = length(var.fargate_subnet_ids) > 0 ? var.fargate_subnet_ids : data.aws_subnets.default_public.ids
 }
 
 # Secrets Manager - Slack Webhook (placeholder)

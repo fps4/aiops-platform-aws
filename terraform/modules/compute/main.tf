@@ -161,6 +161,14 @@ resource "aws_iam_role_policy" "scheduler_policy" {
           var.fargate_task_role_arn,
           var.ecs_task_execution_role_arn,
         ]
+      },
+      {
+        Sid    = "InvokeLambda"
+        Effect = "Allow"
+        Action = ["lambda:InvokeFunction"]
+        Resource = [
+          aws_lambda_function.rule_detection.arn
+        ]
       }
     ]
   })
@@ -220,6 +228,7 @@ resource "aws_lambda_function" "rule_detection" {
     variables = {
       DYNAMODB_ANOMALIES_TABLE = var.anomalies_table_name
       DYNAMODB_EVENTS_TABLE    = var.events_table_name
+      DYNAMODB_POLICY_TABLE    = var.policy_store_table_name
       OPENSEARCH_ENDPOINT      = var.opensearch_endpoint
       ENVIRONMENT              = var.environment
     }
@@ -228,6 +237,22 @@ resource "aws_lambda_function" "rule_detection" {
   tags = {
     Environment = var.environment
     ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_scheduler_schedule" "rule_detection" {
+  name = "${local.name_prefix}-rule-detection-schedule"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  schedule_expression = "rate(5 minutes)"
+
+  target {
+    arn      = aws_lambda_function.rule_detection.arn
+    role_arn = aws_iam_role.scheduler.arn
+    input    = jsonencode({})
   }
 }
 

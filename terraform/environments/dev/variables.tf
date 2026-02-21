@@ -37,6 +37,7 @@ variable "tags" {
 }
 
 variable "fargate_subnet_ids" {
-  description = "Subnet IDs for Fargate statistical detection task"
+  description = "Subnet IDs for Fargate. Defaults to default VPC subnets when empty."
   type        = list(string)
+  default     = []
 }

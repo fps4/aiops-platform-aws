@@ -21,6 +21,8 @@ ORCHESTRATOR_BUILD   := terraform/modules/compute/.builds/orchestrator-pkg
 TF_DIR := terraform/environments/$(ENV)
 
 # ── Derived (lazy — evaluated only when used) ─────────────────────────────────
+# Use project venv if present, otherwise fall back to system python3
+PYTHON          = $(or $(wildcard venv/bin/python3), python3)
 AWS_ACCOUNT_ID  = $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
 ECR_REGISTRY    = $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 ECR_REPO        = $(ECR_REGISTRY)/$(PROJECT_PREFIX)-$(ENV)-statistical-detection
@@ -32,7 +34,10 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-32s\033[0m %s\n", $$1, $$2}' | sort
 
-# ── Lambda builds ─────────────────────────────────────────────────────────────
+# ── Build ─────────────────────────────────────────────────────────────────────
+
+.PHONY: build
+build: build-lambdas build-fargate ## Build everything: all Lambda packages + Fargate image
 
 .PHONY: build-lambdas
 build-lambdas: build-log-normalizer build-rule-detection build-orchestrator ## Stage all Lambda packages (source + shared + pip deps)
@@ -109,6 +114,16 @@ tf-destroy: ## terraform destroy for ENV (prompts for confirmation)
 .PHONY: deploy
 deploy: build-lambdas tf-apply build-fargate ## Full deploy: stage Lambdas → terraform apply → push Fargate image
 	@echo "✓ Deploy complete (ENV=$(ENV))"
+
+# ── Operations ───────────────────────────────────────────────────────────────
+
+.PHONY: load-policies
+load-policies: ## Load detection policies into DynamoDB (ENV=dev, FILE=policies/examples/default-policies.yaml)
+	scripts/load-policies.sh --file policies/examples/default-policies.yaml --env $(ENV) --region $(AWS_REGION)
+
+.PHONY: inject-test-event
+inject-test-event: ## Write a synthetic anomaly to DynamoDB to trigger the orchestrator pipeline
+	$(PYTHON) scripts/inject_test_event.py --env $(ENV) --region $(AWS_REGION)
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
