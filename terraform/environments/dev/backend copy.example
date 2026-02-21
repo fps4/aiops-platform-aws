@@ -1,5 +1,0 @@
-bucket = "YOUR_AWS_ACCOUNT_ID-aiops-platform-terraform-state"
-key    = "dev/terraform.tfstate"
-region = "eu-central-1"
-encrypt = true
-use_lockfile = true
