@@ -37,7 +37,6 @@ variable "tags" {
 }
 
 variable "fargate_subnet_ids" {
-  description = "Subnet IDs for Fargate statistical detection task. Leave empty to skip the EventBridge schedule."
+  description = "Subnet IDs for Fargate statistical detection task"
   type        = list(string)
-  default     = []
 }

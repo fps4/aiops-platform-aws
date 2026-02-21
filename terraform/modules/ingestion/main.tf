@@ -1,16 +1,17 @@
 locals {
   name_prefix = "${var.project_prefix}-${var.environment}"
-  # Path to log-normalizer source, relative to the repo root
-  log_normalizer_src = "${path.root}/../../../src/ingestion/lambda/log-normalizer"
+  # Staging dir populated by `make build-log-normalizer` (source + shared + pip deps).
+  # Run `make build-lambdas` before terraform apply.
+  log_normalizer_pkg = "${path.module}/.builds/log-normalizer-pkg"
 }
 
 # ─── Log-Normalizer Lambda ────────────────────────────────────────────────────
 
 data "archive_file" "log_normalizer" {
   type        = "zip"
-  source_dir  = local.log_normalizer_src
+  source_dir  = local.log_normalizer_pkg
   output_path = "${path.module}/.builds/log-normalizer.zip"
-  excludes    = ["__pycache__", "*.pyc", "tests"]
+  excludes    = ["__pycache__", "*.pyc"]
 }
 
 resource "aws_lambda_function" "log_normalizer" {

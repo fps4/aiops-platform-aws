@@ -55,6 +55,12 @@ variable "fargate_subnet_ids" {
   default     = []
 }
 
+variable "fargate_security_group_ids" {
+  description = "Security group IDs to attach to the Fargate task network interface. Defaults to empty (uses VPC default SG)."
+  type        = list(string)
+  default     = []
+}
+
 variable "anomalies_table_stream_arn" {
   description = "ARN of the DynamoDB Streams stream on the anomalies table (triggers orchestrator Lambda)"
   type        = string

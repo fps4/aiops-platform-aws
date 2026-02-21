@@ -1,8 +1,9 @@
 locals {
-  name_prefix        = "${var.project_prefix}-${var.environment}"
-  rule_detection_src = "${path.root}/../../../src/detection/rules"
-  orchestrator_src   = "${path.root}/../../../src/orchestration/lambda/orchestrator"
-  shared_src         = "${path.root}/../../../src/shared"
+  name_prefix = "${var.project_prefix}-${var.environment}"
+  # Staging dirs populated by `make build-lambdas` (source + shared + pip deps).
+  # Run `make build-lambdas` before terraform apply.
+  rule_detection_pkg = "${path.module}/.builds/rule-detection-pkg"
+  orchestrator_pkg   = "${path.module}/.builds/orchestrator-pkg"
 }
 
 # ─── ECR Repository for Statistical Detection ─────────────────────────────────
@@ -19,6 +20,25 @@ resource "aws_ecr_repository" "statistical_detection" {
     Environment = var.environment
     ManagedBy   = "terraform"
   }
+}
+
+resource "aws_ecr_lifecycle_policy" "statistical_detection" {
+  repository = aws_ecr_repository.statistical_detection.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 10 images"
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 10
+        }
+        action = { type = "expire" }
+      }
+    ]
+  })
 }
 
 # ─── ECS Cluster ──────────────────────────────────────────────────────────────
@@ -170,6 +190,7 @@ resource "aws_scheduler_schedule" "statistical_detection" {
       network_configuration {
         assign_public_ip = true
         subnets          = var.fargate_subnet_ids
+        security_groups  = length(var.fargate_security_group_ids) > 0 ? var.fargate_security_group_ids : null
       }
     }
   }
@@ -179,9 +200,9 @@ resource "aws_scheduler_schedule" "statistical_detection" {
 
 data "archive_file" "rule_detection" {
   type        = "zip"
-  source_dir  = local.rule_detection_src
+  source_dir  = local.rule_detection_pkg
   output_path = "${path.module}/.builds/rule-detection.zip"
-  excludes    = ["__pycache__", "*.pyc", "tests"]
+  excludes    = ["__pycache__", "*.pyc"]
 }
 
 resource "aws_lambda_function" "rule_detection" {
@@ -214,52 +235,9 @@ resource "aws_lambda_function" "rule_detection" {
 
 data "archive_file" "orchestrator" {
   type        = "zip"
+  source_dir  = local.orchestrator_pkg
   output_path = "${path.module}/.builds/orchestrator.zip"
-
-  source {
-    content  = file("${local.orchestrator_src}/handler.py")
-    filename = "handler.py"
-  }
-  source {
-    content  = file("${local.orchestrator_src}/detection_agent.py")
-    filename = "detection_agent.py"
-  }
-  source {
-    content  = file("${local.orchestrator_src}/correlation_agent.py")
-    filename = "correlation_agent.py"
-  }
-  source {
-    content  = file("${local.orchestrator_src}/historical_agent.py")
-    filename = "historical_agent.py"
-  }
-  source {
-    content  = file("${local.orchestrator_src}/rca_agent.py")
-    filename = "rca_agent.py"
-  }
-  source {
-    content  = file("${local.orchestrator_src}/recommendation_agent.py")
-    filename = "recommendation_agent.py"
-  }
-  source {
-    content  = file("${local.orchestrator_src}/slack_notifier.py")
-    filename = "slack_notifier.py"
-  }
-  source {
-    content  = file("${local.shared_src}/logger.py")
-    filename = "shared/logger.py"
-  }
-  source {
-    content  = file("${local.shared_src}/opensearch_client.py")
-    filename = "shared/opensearch_client.py"
-  }
-  source {
-    content  = file("${local.shared_src}/bedrock_client.py")
-    filename = "shared/bedrock_client.py"
-  }
-  source {
-    content  = ""
-    filename = "shared/__init__.py"
-  }
+  excludes    = ["__pycache__", "*.pyc"]
 }
 
 resource "aws_cloudwatch_log_group" "orchestrator" {

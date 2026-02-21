@@ -1,6 +1,10 @@
 # Central account ID (placeholder - update with actual account ID)
 central_account_id = "123456789012"
 
+# Subnets for Fargate statistical detection task
+# aws ec2 describe-subnets --filters "Name=vpc-id,Values=<vpc-id>" "Name=defaultForAz,Values=true" --query 'Subnets[*].SubnetId'
+fargate_subnet_ids = []
+
 # Member account IDs for testing (placeholder - update with actual account IDs)
 member_account_ids = [
   "234567890123",

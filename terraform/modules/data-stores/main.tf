@@ -343,7 +343,7 @@ resource "aws_opensearchserverless_security_policy" "encryption" {
   })
 }
 
-# Network policy (public access with IAM)
+# Network policy: public access (requests still require SigV4 IAM auth)
 resource "aws_opensearchserverless_security_policy" "network" {
   name = "${var.project_prefix}-${var.environment}-network"
   type = "network"
@@ -352,9 +352,7 @@ resource "aws_opensearchserverless_security_policy" "network" {
     {
       Rules = [
         {
-          Resource = [
-            "collection/${var.project_prefix}-${var.environment}-logs"
-          ]
+          Resource     = ["collection/${var.project_prefix}-${var.environment}-logs"]
           ResourceType = "collection"
         }
       ]
