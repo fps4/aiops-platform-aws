@@ -1,12 +1,7 @@
-# Auto-discover default VPC subnets for Fargate (used when fargate_subnet_ids not set in tfvars)
-data "aws_vpc" "default" {
-  default = true
-}
-
 data "aws_subnets" "default_public" {
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+    values = var.fargate_subnet_ids
   }
   filter {
     name   = "defaultForAz"
