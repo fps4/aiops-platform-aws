@@ -52,3 +52,18 @@ output "slack_webhook_secret_arn" {
   description = "ARN of Slack webhook secret"
   value       = aws_secretsmanager_secret.slack_webhook.arn
 }
+
+output "orchestrator_function_name" {
+  description = "Name of the orchestrator Lambda function"
+  value       = module.compute.orchestrator_function_name
+}
+
+output "orchestrator_function_arn" {
+  description = "ARN of the orchestrator Lambda function"
+  value       = module.compute.orchestrator_function_arn
+}
+
+output "ecr_repository_url" {
+  description = "ECR repository URL for statistical detection image"
+  value       = module.compute.ecr_repository_url
+}

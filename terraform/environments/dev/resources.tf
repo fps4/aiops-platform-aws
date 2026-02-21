@@ -43,8 +43,11 @@ module "compute" {
   ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
   opensearch_endpoint         = module.data_stores.opensearch_collection_endpoint
   anomalies_table_name        = module.data_stores.anomalies_table_name
+  anomalies_table_stream_arn  = module.data_stores.anomalies_table_stream_arn
+  agent_state_table_name      = module.data_stores.agent_state_table_name
   policy_store_table_name     = module.data_stores.policy_store_table_name
   events_table_name           = module.data_stores.events_table_name
+  slack_webhook_secret_arn    = aws_secretsmanager_secret.slack_webhook.arn
   aws_region                  = var.aws_region
   fargate_subnet_ids          = var.fargate_subnet_ids
 }

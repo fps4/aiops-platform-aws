@@ -1,11 +1,17 @@
 # S3 Buckets
 
+data "aws_caller_identity" "current" {}
+
+locals {
+  bucket_prefix = "${data.aws_caller_identity.current.account_id}-${var.project_prefix}-${var.environment}"
+}
+
 # Raw logs bucket
 resource "aws_s3_bucket" "raw_logs" {
-  bucket = "${var.project_prefix}-${var.environment}-raw-logs"
+  bucket = "${local.bucket_prefix}-raw-logs"
 
   tags = {
-    Name        = "${var.project_prefix}-${var.environment}-raw-logs"
+    Name        = "${local.bucket_prefix}-raw-logs"
     Environment = var.environment
     ManagedBy   = "terraform"
   }
@@ -51,10 +57,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "raw_logs" {
 
 # Audit logs bucket
 resource "aws_s3_bucket" "audit_logs" {
-  bucket = "${var.project_prefix}-${var.environment}-audit-logs"
+  bucket = "${local.bucket_prefix}-audit-logs"
 
   tags = {
-    Name        = "${var.project_prefix}-${var.environment}-audit-logs"
+    Name        = "${local.bucket_prefix}-audit-logs"
     Environment = var.environment
     ManagedBy   = "terraform"
   }
@@ -97,10 +103,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "audit_logs" {
 
 # Dashboard screenshots bucket
 resource "aws_s3_bucket" "dashboard_screenshots" {
-  bucket = "${var.project_prefix}-${var.environment}-dashboard-screenshots"
+  bucket = "${local.bucket_prefix}-dashboard-screenshots"
 
   tags = {
-    Name        = "${var.project_prefix}-${var.environment}-dashboard-screenshots"
+    Name        = "${local.bucket_prefix}-dashboard-screenshots"
     Environment = var.environment
     ManagedBy   = "terraform"
   }

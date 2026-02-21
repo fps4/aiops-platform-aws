@@ -54,3 +54,18 @@ variable "fargate_subnet_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "anomalies_table_stream_arn" {
+  description = "ARN of the DynamoDB Streams stream on the anomalies table (triggers orchestrator Lambda)"
+  type        = string
+}
+
+variable "agent_state_table_name" {
+  description = "Name of the DynamoDB agent_state table used by the orchestrator"
+  type        = string
+}
+
+variable "slack_webhook_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing the Slack webhook URL"
+  type        = string
+}

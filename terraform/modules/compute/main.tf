@@ -1,6 +1,8 @@
 locals {
-  name_prefix       = "${var.project_prefix}-${var.environment}"
+  name_prefix        = "${var.project_prefix}-${var.environment}"
   rule_detection_src = "${path.root}/../../../src/detection/rules"
+  orchestrator_src   = "${path.root}/../../../src/orchestration/lambda/orchestrator"
+  shared_src         = "${path.root}/../../../src/shared"
 }
 
 # ─── ECR Repository for Statistical Detection ─────────────────────────────────
@@ -205,5 +207,112 @@ resource "aws_lambda_function" "rule_detection" {
   tags = {
     Environment = var.environment
     ManagedBy   = "terraform"
+  }
+}
+
+# ─── Orchestrator Lambda ───────────────────────────────────────────────────────
+
+data "archive_file" "orchestrator" {
+  type        = "zip"
+  output_path = "${path.module}/.builds/orchestrator.zip"
+
+  source {
+    content  = file("${local.orchestrator_src}/handler.py")
+    filename = "handler.py"
+  }
+  source {
+    content  = file("${local.orchestrator_src}/detection_agent.py")
+    filename = "detection_agent.py"
+  }
+  source {
+    content  = file("${local.orchestrator_src}/correlation_agent.py")
+    filename = "correlation_agent.py"
+  }
+  source {
+    content  = file("${local.orchestrator_src}/historical_agent.py")
+    filename = "historical_agent.py"
+  }
+  source {
+    content  = file("${local.orchestrator_src}/rca_agent.py")
+    filename = "rca_agent.py"
+  }
+  source {
+    content  = file("${local.orchestrator_src}/recommendation_agent.py")
+    filename = "recommendation_agent.py"
+  }
+  source {
+    content  = file("${local.orchestrator_src}/slack_notifier.py")
+    filename = "slack_notifier.py"
+  }
+  source {
+    content  = file("${local.shared_src}/logger.py")
+    filename = "shared/logger.py"
+  }
+  source {
+    content  = file("${local.shared_src}/opensearch_client.py")
+    filename = "shared/opensearch_client.py"
+  }
+  source {
+    content  = file("${local.shared_src}/bedrock_client.py")
+    filename = "shared/bedrock_client.py"
+  }
+  source {
+    content  = ""
+    filename = "shared/__init__.py"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "orchestrator" {
+  name              = "/aws/lambda/${local.name_prefix}-orchestrator"
+  retention_in_days = 14
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_lambda_function" "orchestrator" {
+  function_name = "${local.name_prefix}-orchestrator"
+  role          = var.lambda_execution_role_arn
+  runtime       = "python3.13"
+  handler       = "handler.lambda_handler"
+  timeout       = 300
+  memory_size   = 512
+
+  filename         = data.archive_file.orchestrator.output_path
+  source_code_hash = data.archive_file.orchestrator.output_base64sha256
+
+  environment {
+    variables = {
+      DYNAMODB_ANOMALIES_TABLE   = var.anomalies_table_name
+      DYNAMODB_AGENT_STATE_TABLE = var.agent_state_table_name
+      DYNAMODB_EVENTS_TABLE      = var.events_table_name
+      OPENSEARCH_ENDPOINT        = var.opensearch_endpoint
+      SLACK_WEBHOOK_SECRET_ARN   = var.slack_webhook_secret_arn
+      ENVIRONMENT                = var.environment
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.orchestrator]
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+# DynamoDB Streams → Orchestrator Lambda trigger
+resource "aws_lambda_event_source_mapping" "anomalies_stream" {
+  event_source_arn               = var.anomalies_table_stream_arn
+  function_name                  = aws_lambda_function.orchestrator.arn
+  starting_position              = "LATEST"
+  batch_size                     = 10
+  bisect_batch_on_function_error = true
+
+  filter_criteria {
+    filter {
+      pattern = jsonencode({ eventName = ["INSERT"] })
+    }
   }
 }
