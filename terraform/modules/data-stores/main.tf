@@ -354,6 +354,10 @@ resource "aws_opensearchserverless_security_policy" "network" {
         {
           Resource     = ["collection/${var.project_prefix}-${var.environment}-logs"]
           ResourceType = "collection"
+        },
+        {
+          Resource     = ["collection/${var.project_prefix}-${var.environment}-logs"]
+          ResourceType = "dashboard"
         }
       ]
       AllowFromPublic = true
@@ -369,18 +373,6 @@ resource "aws_opensearchserverless_access_policy" "data_access" {
   policy = jsonencode([
     {
       Rules = [
-        {
-          Resource = [
-            "collection/${var.project_prefix}-${var.environment}-logs"
-          ]
-          Permission = [
-            "aoss:CreateCollectionItems",
-            "aoss:DeleteCollectionItems",
-            "aoss:UpdateCollectionItems",
-            "aoss:DescribeCollectionItems"
-          ]
-          ResourceType = "collection"
-        },
         {
           Resource = [
             "index/${var.project_prefix}-${var.environment}-logs/*"

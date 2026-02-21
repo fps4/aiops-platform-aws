@@ -57,6 +57,37 @@ resource "aws_ecs_cluster" "detection" {
   }
 }
 
+# ─── Networking Helpers ───────────────────────────────────────────────────────
+
+# Derive VPC for the provided Fargate subnets (only when subnets are given).
+data "aws_subnet" "fargate_primary" {
+  count = length(var.fargate_subnet_ids) > 0 ? 1 : 0
+
+  id = var.fargate_subnet_ids[0]
+}
+
+# Security group with allow-all egress for Fargate tasks when no SGs are supplied.
+resource "aws_security_group" "fargate_egress_all" {
+  count = length(var.fargate_subnet_ids) > 0 ? 1 : 0
+
+  name        = "${local.name_prefix}-fargate-egress"
+  description = "Allow all egress for Fargate tasks"
+  vpc_id      = data.aws_subnet.fargate_primary[0].vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
 # ─── CloudWatch Log Group for ECS ─────────────────────────────────────────────
 
 resource "aws_cloudwatch_log_group" "statistical_detection" {
@@ -198,7 +229,7 @@ resource "aws_scheduler_schedule" "statistical_detection" {
       network_configuration {
         assign_public_ip = true
         subnets          = var.fargate_subnet_ids
-        security_groups  = length(var.fargate_security_group_ids) > 0 ? var.fargate_security_group_ids : null
+        security_groups  = length(var.fargate_security_group_ids) > 0 ? var.fargate_security_group_ids : [aws_security_group.fargate_egress_all[0].id]
       }
     }
   }

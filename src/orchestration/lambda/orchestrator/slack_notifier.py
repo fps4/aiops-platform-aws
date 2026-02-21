@@ -1,7 +1,9 @@
 """Slack Notifier — formats RCA workflow results and posts to Slack via webhook."""
 import json
 import os
+import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 import boto3
 
@@ -32,6 +34,43 @@ def _webhook_url() -> str:
     return secret["webhook_url"]
 
 
+def _build_dashboard_url(opensearch_endpoint: str, anomaly: dict) -> str:
+    """Build a deep-link URL to the RCA Evidence Explorer dashboard.
+
+    Adds a ±30-minute time window around the anomaly timestamp and filters
+    by service so the dashboard opens pre-filtered to the relevant incident.
+    """
+    if not opensearch_endpoint:
+        return ""
+
+    anomaly_id = anomaly.get("anomaly_id", "")
+    service = anomaly.get("service", "")
+    ts_str = anomaly.get("timestamp", "")
+
+    try:
+        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        ts = datetime.now(timezone.utc)
+
+    time_from = (ts - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    time_to = (ts + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    filters = (
+        f"!((query:(match_phrase:(service:'{service}'))))"
+        if service
+        else "!()"
+    )
+    global_state = f"(time:(from:'{time_from}',to:'{time_to}'))"
+    app_state = f"(filters:{filters})"
+
+    base = f"https://{opensearch_endpoint}/_dashboards/app/dashboards"
+    params = urllib.parse.urlencode({
+        "_g": global_state,
+        "_a": app_state,
+    })
+    return f"{base}#/view/rca-evidence-explorer?{params}"
+
+
 def notify(ctx: dict) -> None:
     anomaly = ctx["anomaly"]
     rca = ctx.get("root_cause_analysis", {})
@@ -58,7 +97,7 @@ def notify(ctx: dict) -> None:
     confidence = rca.get("confidence", "N/A")
 
     opensearch_endpoint = os.environ.get("OPENSEARCH_ENDPOINT", "")
-    dashboard_url = f"https://{opensearch_endpoint}/_dashboards" if opensearch_endpoint else ""
+    dashboard_url = _build_dashboard_url(opensearch_endpoint, anomaly)
 
     blocks: list = [
         {

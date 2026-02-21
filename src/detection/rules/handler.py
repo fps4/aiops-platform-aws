@@ -141,6 +141,24 @@ def _write_anomaly(
     return item
 
 
+def _index_anomaly_to_opensearch(opensearch, anomaly: dict[str, Any]) -> None:
+    """Index an anomaly document to OpenSearch. Skips DynamoDB-only fields."""
+    exclude = {"ttl"}
+    doc = {k: v for k, v in anomaly.items() if k not in exclude}
+    date = anomaly["timestamp"][:10].replace("-", ".")
+    try:
+        opensearch.index(
+            index=f"anomalies-{date}",
+            doc=doc,
+            doc_id=anomaly["anomaly_id"],
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to index anomaly to OpenSearch: id=%s error=%s",
+            anomaly["anomaly_id"], exc,
+        )
+
+
 # ─── Rule evaluators ──────────────────────────────────────────────────────────
 
 def _check_error_rate(
@@ -451,19 +469,24 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         anomaly = _check_error_rate(opensearch, table, service, account_id, thresholds)
         if anomaly:
+            _index_anomaly_to_opensearch(opensearch, anomaly)
             detected.append(anomaly)
 
         anomaly = _check_latency_regression(opensearch, table, service, account_id, thresholds)
         if anomaly:
+            _index_anomaly_to_opensearch(opensearch, anomaly)
             detected.append(anomaly)
 
         anomaly = _check_traffic_drop(opensearch, table, service, account_id, thresholds)
         if anomaly:
+            _index_anomaly_to_opensearch(opensearch, anomaly)
             detected.append(anomaly)
 
     iam_anomalies = _check_iam_policy_changes(
         opensearch, table, account_id, _load_thresholds("iam")
     )
+    for iam_anomaly in iam_anomalies:
+        _index_anomaly_to_opensearch(opensearch, iam_anomaly)
     detected.extend(iam_anomalies)
 
     logger.info(

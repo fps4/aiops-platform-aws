@@ -150,6 +150,26 @@ def _build_anomaly(
     }
 
 
+def _anomaly_for_opensearch(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert a DynamoDB anomaly item to an OpenSearch-safe document.
+
+    Converts Decimal values to float (OpenSearch rejects DynamoDB Decimal types)
+    and drops DynamoDB-specific fields like ttl.
+    """
+    def _convert(v: Any) -> Any:
+        from decimal import Decimal as _Decimal
+        if isinstance(v, _Decimal):
+            return float(v)
+        if isinstance(v, dict):
+            return {k: _convert(val) for k, val in v.items()}
+        if isinstance(v, list):
+            return [_convert(i) for i in v]
+        return v
+
+    exclude = {"ttl"}
+    return {k: _convert(v) for k, v in item.items() if k not in exclude}
+
+
 def _severity_from_z(z: float) -> str:
     az = abs(z)
     if az >= 4:
@@ -203,6 +223,18 @@ def run_detection() -> int:
                 if algorithms.is_anomaly(score, sensitivity):
                     anomaly = _build_anomaly(policy, service, metric_field, score, [], current_value)
                     anomalies_table.put_item(Item=anomaly)
+                    date = anomaly["timestamp"][:10].replace("-", ".")
+                    try:
+                        opensearch.index(
+                            index=f"anomalies-{date}",
+                            doc=_anomaly_for_opensearch(anomaly),
+                            doc_id=anomaly["anomaly_id"],
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "Failed to index anomaly to OpenSearch",
+                            extra={"anomaly_id": anomaly["anomaly_id"], "error": str(exc)},
+                        )
                     total_anomalies += 1
                 continue
 
@@ -225,6 +257,18 @@ def run_detection() -> int:
                     policy, service, metric_field, z, changepoints, current_value
                 )
                 anomalies_table.put_item(Item=anomaly)
+                date = anomaly["timestamp"][:10].replace("-", ".")
+                try:
+                    opensearch.index(
+                        index=f"anomalies-{date}",
+                        doc=_anomaly_for_opensearch(anomaly),
+                        doc_id=anomaly["anomaly_id"],
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to index anomaly to OpenSearch",
+                        extra={"anomaly_id": anomaly["anomaly_id"], "error": str(exc)},
+                    )
                 total_anomalies += 1
                 logger.info(
                     "Statistical anomaly detected",
