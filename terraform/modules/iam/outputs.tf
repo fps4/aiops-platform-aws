@@ -8,9 +8,14 @@ output "lambda_execution_role_name" {
   value       = aws_iam_role.lambda_execution.name
 }
 
-output "step_functions_execution_role_arn" {
-  description = "ARN of Step Functions execution role"
-  value       = aws_iam_role.step_functions_execution.arn
+output "fargate_task_role_arn" {
+  description = "ARN of Fargate task role"
+  value       = aws_iam_role.fargate_task_role.arn
+}
+
+output "ecs_task_execution_role_arn" {
+  description = "ARN of ECS task execution role"
+  value       = aws_iam_role.ecs_task_execution_role.arn
 }
 
 output "firehose_delivery_role_arn" {

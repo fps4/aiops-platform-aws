@@ -16,7 +16,37 @@ module "data_stores" {
   project_prefix     = var.project_prefix
   central_account_id = var.central_account_id
   retention_days     = var.retention_days
-  enable_timestream  = false # Set to true after contacting AWS Support for Timestream access
+}
+
+# Ingestion Module
+module "ingestion" {
+  source = "../../modules/ingestion"
+
+  environment                = var.environment
+  project_prefix             = var.project_prefix
+  lambda_execution_role_arn  = module.iam.lambda_execution_role_arn
+  firehose_delivery_role_arn = module.iam.firehose_delivery_role_arn
+  raw_logs_bucket_arn        = module.data_stores.raw_logs_bucket_arn
+  raw_logs_bucket_name       = module.data_stores.raw_logs_bucket_name
+  opensearch_endpoint        = module.data_stores.opensearch_collection_endpoint
+  aws_region                 = var.aws_region
+}
+
+# Compute Module
+module "compute" {
+  source = "../../modules/compute"
+
+  environment                 = var.environment
+  project_prefix              = var.project_prefix
+  lambda_execution_role_arn   = module.iam.lambda_execution_role_arn
+  fargate_task_role_arn       = module.iam.fargate_task_role_arn
+  ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
+  opensearch_endpoint         = module.data_stores.opensearch_collection_endpoint
+  anomalies_table_name        = module.data_stores.anomalies_table_name
+  policy_store_table_name     = module.data_stores.policy_store_table_name
+  events_table_name           = module.data_stores.events_table_name
+  aws_region                  = var.aws_region
+  fargate_subnet_ids          = var.fargate_subnet_ids
 }
 
 # Secrets Manager - Slack Webhook (placeholder)
@@ -114,11 +144,20 @@ resource "aws_ssm_parameter" "bedrock_max_tokens" {
   tags = var.tags
 }
 
-resource "aws_ssm_parameter" "bedrock_temperature" {
-  name        = "/${var.project_prefix}/${var.environment}/bedrock/temperature"
+resource "aws_ssm_parameter" "bedrock_rca_temperature" {
+  name        = "/${var.project_prefix}/${var.environment}/bedrock/rca_temperature"
   type        = "String"
-  value       = "0.7"
-  description = "Temperature for Bedrock model responses (0.0-1.0)"
+  value       = "0.2"
+  description = "Temperature for RCA agent (deterministic)"
+
+  tags = var.tags
+}
+
+resource "aws_ssm_parameter" "bedrock_recommendation_temperature" {
+  name        = "/${var.project_prefix}/${var.environment}/bedrock/recommendation_temperature"
+  type        = "String"
+  value       = "0.3"
+  description = "Temperature for recommendation agent"
 
   tags = var.tags
 }

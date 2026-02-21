@@ -35,3 +35,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "fargate_subnet_ids" {
+  description = "Subnet IDs for Fargate statistical detection task. Leave empty to skip the EventBridge schedule."
+  type        = list(string)
+  default     = []
+}

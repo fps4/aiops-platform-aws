@@ -135,11 +135,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dashboard_screens
 
 # Anomalies table
 resource "aws_dynamodb_table" "anomalies" {
-  name           = "${var.project_prefix}-${var.environment}-anomalies"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "anomaly_id"
-  range_key      = "timestamp"
-  stream_enabled = true
+  name             = "${var.project_prefix}-${var.environment}-anomalies"
+  billing_mode     = "PAY_PER_REQUEST"
+  hash_key         = "anomaly_id"
+  range_key        = "timestamp"
+  stream_enabled   = true
   stream_view_type = "NEW_IMAGE"
 
   attribute {
@@ -412,38 +412,6 @@ resource "aws_opensearchserverless_collection" "logs" {
 
   tags = {
     Name        = "${var.project_prefix}-${var.environment}-logs"
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
-}
-
-# Timestream Database and Table (optional - requires AWS Support approval)
-
-resource "aws_timestreamwrite_database" "metrics" {
-  count = var.enable_timestream ? 1 : 0
-  
-  database_name = "${var.project_prefix}-${var.environment}-metrics"
-
-  tags = {
-    Name        = "${var.project_prefix}-${var.environment}-metrics"
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
-}
-
-resource "aws_timestreamwrite_table" "metrics" {
-  count = var.enable_timestream ? 1 : 0
-  
-  database_name = aws_timestreamwrite_database.metrics[0].database_name
-  table_name    = "service-metrics"
-
-  retention_properties {
-    magnetic_store_retention_period_in_days = var.retention_days
-    memory_store_retention_period_in_hours  = 720 # 30 days
-  }
-
-  tags = {
-    Name        = "${var.project_prefix}-${var.environment}-service-metrics"
     Environment = var.environment
     ManagedBy   = "terraform"
   }

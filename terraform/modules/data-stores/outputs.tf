@@ -62,13 +62,3 @@ output "opensearch_collection_id" {
   description = "ID of OpenSearch Serverless collection"
   value       = aws_opensearchserverless_collection.logs.id
 }
-
-output "timestream_database_name" {
-  description = "Name of Timestream database (empty if disabled)"
-  value       = var.enable_timestream ? aws_timestreamwrite_database.metrics[0].database_name : ""
-}
-
-output "timestream_table_name" {
-  description = "Name of Timestream table (empty if disabled)"
-  value       = var.enable_timestream ? aws_timestreamwrite_table.metrics[0].table_name : ""
-}

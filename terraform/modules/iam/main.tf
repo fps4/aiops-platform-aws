@@ -52,6 +52,19 @@ resource "aws_iam_role_policy" "lambda_aiops" {
         ]
       },
       {
+        Sid    = "DynamoDBStreamsAccess"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetRecords",
+          "dynamodb:GetShardIterator",
+          "dynamodb:DescribeStream",
+          "dynamodb:ListStreams"
+        ]
+        Resource = [
+          "arn:aws:dynamodb:*:${var.central_account_id}:table/${var.project_prefix}-${var.environment}-*/stream/*"
+        ]
+      },
+      {
         Sid    = "S3Access"
         Effect = "Allow"
         Action = [
@@ -72,21 +85,6 @@ resource "aws_iam_role_policy" "lambda_aiops" {
         ]
         Resource = [
           "arn:aws:aoss:*:${var.central_account_id}:collection/*"
-        ]
-      },
-      {
-        Sid    = "TimestreamAccess"
-        Effect = "Allow"
-        Action = [
-          "timestream:WriteRecords",
-          "timestream:Select",
-          "timestream:DescribeTable",
-          "timestream:DescribeDatabase"
-        ]
-        # Note: Timestream is optional - permissions won't error if service not enabled
-        Resource = [
-          "arn:aws:timestream:*:${var.central_account_id}:database/${var.project_prefix}-${var.environment}-metrics",
-          "arn:aws:timestream:*:${var.central_account_id}:database/${var.project_prefix}-${var.environment}-metrics/table/*"
         ]
       },
       {
@@ -126,9 +124,9 @@ resource "aws_iam_role_policy" "lambda_aiops" {
   })
 }
 
-# Step Functions Execution Role
-resource "aws_iam_role" "step_functions_execution" {
-  name = "${var.project_prefix}-${var.environment}-stepfunctions-execution"
+# Fargate Task Role (for container workloads)
+resource "aws_iam_role" "fargate_task_role" {
+  name = "${var.project_prefix}-${var.environment}-fargate-task"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -137,7 +135,7 @@ resource "aws_iam_role" "step_functions_execution" {
         Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
-          Service = "states.amazonaws.com"
+          Service = "ecs-tasks.amazonaws.com"
         }
       }
     ]
@@ -149,47 +147,97 @@ resource "aws_iam_role" "step_functions_execution" {
   }
 }
 
-# Step Functions Policy
-resource "aws_iam_role_policy" "step_functions_aiops" {
-  name = "${var.project_prefix}-${var.environment}-stepfunctions-policy"
-  role = aws_iam_role.step_functions_execution.id
+resource "aws_iam_role_policy" "fargate_task_policy" {
+  name = "${var.project_prefix}-${var.environment}-fargate-task-policy"
+  role = aws_iam_role.fargate_task_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "LambdaInvoke"
+        Sid    = "OpenSearchAccess"
         Effect = "Allow"
         Action = [
-          "lambda:InvokeFunction"
+          "aoss:APIAccessAll"
         ]
         Resource = [
-          "arn:aws:lambda:*:${var.central_account_id}:function:${var.project_prefix}-${var.environment}-*"
+          "arn:aws:aoss:*:${var.central_account_id}:collection/*"
         ]
       },
       {
-        Sid    = "DynamoDBAccess"
+        Sid    = "DynamoDBWriteAnomalies"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:PutItem"
+        ]
+        Resource = [
+          "arn:aws:dynamodb:*:${var.central_account_id}:table/${var.project_prefix}-${var.environment}-anomalies"
+        ]
+      },
+      {
+        Sid    = "DynamoDBReadPolicies"
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem"
+          "dynamodb:Query"
         ]
         Resource = [
-          "arn:aws:dynamodb:*:${var.central_account_id}:table/${var.project_prefix}-${var.environment}-agent-state"
+          "arn:aws:dynamodb:*:${var.central_account_id}:table/${var.project_prefix}-${var.environment}-policy-store"
         ]
       },
       {
-        Sid    = "XRayAccess"
+        Sid    = "SSMParameterAccess"
         Effect = "Allow"
         Action = [
-          "xray:PutTraceSegments",
-          "xray:PutTelemetryRecords"
+          "ssm:GetParameter",
+          "ssm:GetParametersByPath"
         ]
-        Resource = ["*"]
+        Resource = [
+          "arn:aws:ssm:*:${var.central_account_id}:parameter/${var.project_prefix}/${var.environment}/*"
+        ]
+      },
+      {
+        Sid    = "CloudWatchLogsAccess"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = [
+          "arn:aws:logs:*:${var.central_account_id}:log-group:/ecs/${var.project_prefix}-${var.environment}-*"
+        ]
       }
     ]
   })
+}
+
+# ECS Task Execution Role (for pulling ECR images and writing logs)
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "${var.project_prefix}-${var.environment}-ecs-task-execution"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_basic" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 # Firehose Delivery Role (for CloudWatch Logs → S3)
@@ -253,7 +301,7 @@ resource "aws_iam_role_policy" "firehose_delivery_policy" {
 # Only created if member_account_ids is not empty
 resource "aws_iam_role" "cross_account_read" {
   count = length(var.member_account_ids) > 0 ? 1 : 0
-  
+
   name = "${var.project_prefix}-${var.environment}-cross-account-read"
 
   assume_role_policy = jsonencode({
@@ -277,7 +325,7 @@ resource "aws_iam_role" "cross_account_read" {
 
 resource "aws_iam_role_policy" "cross_account_read_policy" {
   count = length(var.member_account_ids) > 0 ? 1 : 0
-  
+
   name = "${var.project_prefix}-${var.environment}-cross-account-read-policy"
   role = aws_iam_role.cross_account_read[0].id
 

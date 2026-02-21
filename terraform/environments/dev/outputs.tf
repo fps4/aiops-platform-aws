@@ -3,9 +3,9 @@ output "lambda_execution_role_arn" {
   value       = module.iam.lambda_execution_role_arn
 }
 
-output "step_functions_execution_role_arn" {
-  description = "ARN of Step Functions execution role"
-  value       = module.iam.step_functions_execution_role_arn
+output "fargate_task_role_arn" {
+  description = "ARN of Fargate task role"
+  value       = module.iam.fargate_task_role_arn
 }
 
 output "raw_logs_bucket_name" {
@@ -28,14 +28,24 @@ output "anomalies_stream_arn" {
   value       = module.data_stores.anomalies_table_stream_arn
 }
 
-output "timestream_database" {
-  description = "Timestream database name"
-  value       = module.data_stores.timestream_database_name
+output "firehose_stream_arn" {
+  description = "ARN of Kinesis Firehose delivery stream"
+  value       = module.ingestion.firehose_stream_arn
 }
 
-output "timestream_table" {
-  description = "Timestream table name"
-  value       = module.data_stores.timestream_table_name
+output "log_normalizer_function_name" {
+  description = "Name of log normalizer Lambda function"
+  value       = module.ingestion.log_normalizer_function_arn
+}
+
+output "cloudwatch_logs_destination_arn" {
+  description = "ARN of the CloudWatch Logs destination (use in cross-account subscription filters)"
+  value       = module.ingestion.cloudwatch_logs_destination_arn
+}
+
+output "cloudwatch_logs_subscription_role_arn" {
+  description = "ARN of the IAM role for same-account CloudWatch Logs subscription filters"
+  value       = module.ingestion.cloudwatch_logs_subscription_role_arn
 }
 
 output "slack_webhook_secret_arn" {

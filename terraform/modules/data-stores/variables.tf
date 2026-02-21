@@ -1,4 +1,4 @@
-# Data Stores Module - S3, DynamoDB, OpenSearch Serverless, Timestream
+# Data Stores Module - S3, DynamoDB, OpenSearch Serverless
 
 variable "environment" {
   description = "Environment name (dev, staging, prod)"
@@ -20,10 +20,4 @@ variable "retention_days" {
 variable "central_account_id" {
   description = "AWS account ID for central observability account"
   type        = string
-}
-
-variable "enable_timestream" {
-  description = "Enable AWS Timestream for time-series data (requires AWS Support approval for new accounts)"
-  type        = bool
-  default     = false
 }
