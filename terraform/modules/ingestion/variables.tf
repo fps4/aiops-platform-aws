@@ -35,7 +35,7 @@ variable "opensearch_endpoint" {
 }
 
 variable "opensearch_service" {
-  description = "OpenSearch SigV4 service name (es or aoss)"
+  description = "OpenSearch SigV4 service name"
   type        = string
   default     = "es"
 }

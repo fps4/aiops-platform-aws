@@ -223,7 +223,7 @@ The log normaliser creates indices named `logs-<service>-<date>` (e.g. `logs-pay
 ```bash
 curl -X GET "${OPENSEARCH_ENDPOINT}/logs-payment-api-*/_count" \
   -H "Content-Type: application/json" \
-  --aws-sigv4 "aws:amz:eu-central-1:aoss"
+  --aws-sigv4 "aws:eu-central-1:es"
 ```
 
 ---

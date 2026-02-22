@@ -51,29 +51,29 @@ fi
 
 # ── Helper: authenticated PUT/POST ────────────────────────────────────────────
 
-aoss_put() {
+es_put() {
   local path="$1"
   local body="$2"
-  awscurl --service aoss --region "${REGION}" \
+  awscurl --service es --region "${REGION}" \
     -X PUT \
     -H "Content-Type: application/json" \
     -d "${body}" \
     "${ENDPOINT}${path}"
 }
 
-aoss_post() {
+es_post() {
   local path="$1"
   local content_type="${2:-application/json}"
   local data_flag="${3:--d}"
   local data="${4:-}"
   if [[ "${data_flag}" == "--data-binary" ]]; then
-    awscurl --service aoss --region "${REGION}" \
+    awscurl --service es --region "${REGION}" \
       -X POST \
       -H "Content-Type: ${content_type}" \
       --data-binary "${data}" \
       "${ENDPOINT}${path}"
   else
-    awscurl --service aoss --region "${REGION}" \
+    awscurl --service es --region "${REGION}" \
       -X POST \
       -H "Content-Type: ${content_type}" \
       -d "${data}" \
@@ -127,7 +127,7 @@ INDEX_TEMPLATE='{
   }
 }'
 
-TEMPLATE_RESPONSE=$(aoss_put "/_index_template/anomalies-template" "${INDEX_TEMPLATE}")
+TEMPLATE_RESPONSE=$(es_put "/_index_template/anomalies-template" "${INDEX_TEMPLATE}")
 echo "[INFO] Index template response: ${TEMPLATE_RESPONSE}"
 
 if echo "${TEMPLATE_RESPONSE}" | grep -q '"acknowledged":true'; then
@@ -146,7 +146,7 @@ if [[ ! -f "${NDJSON_FILE}" ]]; then
   exit 1
 fi
 
-IMPORT_RESPONSE=$(awscurl --service aoss --region "${REGION}" \
+IMPORT_RESPONSE=$(awscurl --service es --region "${REGION}" \
   -X POST \
   -H "osd-xsrf: true" \
   -H "Content-Type: multipart/form-data" \

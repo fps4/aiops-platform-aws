@@ -133,6 +133,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dashboard_screens
 }
 
 # DynamoDB Tables
+# NOTE: hash_key/range_key are deprecated in AWS provider v6 in favor of key_schema blocks,
+# but key_schema is not yet implemented as of v6.33. Migrate when the provider adds support.
 
 # Anomalies table
 resource "aws_dynamodb_table" "anomalies" {
@@ -357,6 +359,22 @@ resource "aws_opensearch_domain" "logs" {
 
   tags = {
     Name        = "${var.project_prefix}-${var.environment}-logs"
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+# OpenSearch Application (cloud-hosted Dashboards UI with IAM auth)
+resource "aws_opensearch_application" "dashboards" {
+  name = "${var.project_prefix}-${var.environment}-dashboards"
+
+  data_source {
+    data_source_arn         = aws_opensearch_domain.logs.arn
+    data_source_description = "AIOps platform OpenSearch domain"
+  }
+
+  tags = {
+    Name        = "${var.project_prefix}-${var.environment}-dashboards"
     Environment = var.environment
     ManagedBy   = "terraform"
   }

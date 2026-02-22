@@ -176,3 +176,11 @@ resource "aws_ssm_parameter" "bedrock_recommendation_temperature" {
 
   tags = var.tags
 }
+
+resource "aws_ssm_parameter" "opensearch_application_endpoint" {
+  name  = "/${var.project_prefix}/${var.environment}/opensearch_application_endpoint"
+  type  = "String"
+  value = module.data_stores.opensearch_application_endpoint
+
+  tags = var.tags
+}

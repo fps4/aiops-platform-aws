@@ -57,3 +57,13 @@ output "opensearch_domain_arn" {
   description = "ARN of OpenSearch domain"
   value       = aws_opensearch_domain.logs.arn
 }
+
+output "opensearch_application_endpoint" {
+  description = "OpenSearch Application endpoint (Dashboards UI)"
+  value       = aws_opensearch_application.dashboards.endpoint
+}
+
+output "opensearch_application_id" {
+  description = "OpenSearch Application ID"
+  value       = aws_opensearch_application.dashboards.id
+}

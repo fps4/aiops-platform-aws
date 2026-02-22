@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-os.environ.setdefault("OPENSEARCH_ENDPOINT", "https://example.aoss.amazonaws.com")
+os.environ.setdefault("OPENSEARCH_ENDPOINT", "https://example.es.amazonaws.com")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("AWS_REGION", "eu-central-1")
 os.environ.setdefault("DYNAMODB_ANOMALIES_TABLE", "aiops-test-anomalies")

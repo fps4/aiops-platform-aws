@@ -67,3 +67,8 @@ output "ecr_repository_url" {
   description = "ECR repository URL for statistical detection image"
   value       = module.compute.ecr_repository_url
 }
+
+output "opensearch_application_endpoint" {
+  description = "OpenSearch Application endpoint (Dashboards UI)"
+  value       = module.data_stores.opensearch_application_endpoint
+}

@@ -1,8 +1,8 @@
 """OpenSearch client with SigV4 authentication.
 
-Supports both OpenSearch Serverless (service name ``aoss``) and managed
-OpenSearch Service domains (service name ``es``). The service is selected via
-the ``OPENSEARCH_SERVICE`` environment variable (default: ``es``).
+Supports managed OpenSearch Service domains (SigV4 service name ``es``). The
+service is selected via the ``OPENSEARCH_SERVICE`` environment variable
+(default: ``es``). Use the domain endpoint (e.g., ``https://my-domain.eu-central-1.es.amazonaws.com``).
 """
 import os
 from typing import Any
