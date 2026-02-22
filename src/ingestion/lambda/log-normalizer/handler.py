@@ -8,8 +8,9 @@ import base64
 import json
 import logging
 import os
+import gzip
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable, List
 
 # Shared utilities are available when the project root is on sys.path (tests)
 # or when included in the Lambda deployment package.
@@ -30,7 +31,12 @@ except ImportError:
                 logger.addHandler(handler)
                 logger.setLevel(logging.INFO)
             return logger
-        OpenSearchClient = None  # type: ignore[assignment,misc]
+
+        class _StubOS:  # type: ignore[misc]
+            def index(self, *_, **__):
+                pass
+
+        OpenSearchClient = _StubOS  # type: ignore[assignment,misc]
 
 logger = get_logger("log-normalizer")
 
@@ -119,6 +125,48 @@ def _index_to_opensearch(doc: dict[str, Any]) -> None:
         logger.warning("Failed to index document to OpenSearch: %s (index=%s)", exc, index)
 
 
+def _decode_record_data(data_b64: str) -> bytes:
+    """Decode base64 data from Firehose record."""
+    return base64.b64decode(data_b64)
+
+
+def _parse_cwl_subscription(payload: bytes) -> Iterable[dict[str, Any]]:
+    """Parse CloudWatch Logs subscription payload (gzipped JSON).
+
+    Returns iterable of raw log dicts.
+    """
+    try:
+        if payload.startswith(b"\x1f\x8b"):
+            payload = gzip.decompress(payload)
+        text = payload.decode("utf-8")
+    except Exception:
+        # If decode fails, try decompressing even if magic bytes were missing
+        try:
+            payload = gzip.decompress(payload)
+            text = payload.decode("utf-8")
+        except Exception:
+            raise
+
+    body = json.loads(text)
+
+    log_group = body.get("logGroup", "")
+    log_stream = body.get("logStream", "")
+    for event in body.get("logEvents", []) or []:
+        msg = event.get("message", "")
+        # Try to parse message as JSON; fall back to plain text field
+        try:
+            parsed = json.loads(msg)
+            if isinstance(parsed, dict):
+                raw = parsed
+            else:
+                raw = {"message": msg}
+        except json.JSONDecodeError:
+            raw = {"message": msg}
+        raw.setdefault("logGroup", log_group)
+        raw.setdefault("logStream", log_stream)
+        yield raw
+
+
 def _process_record(record: dict[str, Any]) -> dict[str, Any]:
     """Process a single Firehose record.
 
@@ -127,33 +175,41 @@ def _process_record(record: dict[str, Any]) -> dict[str, Any]:
     """
     record_id = record["recordId"]
     try:
-        raw_data = base64.b64decode(record["data"]).decode("utf-8").strip()
-        if not raw_data:
+        payload = _decode_record_data(record["data"])
+
+        raw_docs: List[dict[str, Any]] = []
+        # CWL subscription delivers gzipped JSON with logEvents
+        try:
+            raw_docs = list(_parse_cwl_subscription(payload))
+        except Exception:
+            # Not a CWL subscription payload; try plain JSON
+            try:
+                raw_json = json.loads(payload.decode("utf-8").strip())
+                raw_docs = [raw_json]
+            except Exception:
+                raw_docs = []
+
+        if not raw_docs:
             return {
                 "recordId": record_id,
                 "result": "Dropped",
                 "data": record["data"],
             }
 
-        raw = json.loads(raw_data)
-        normalized = _normalize_record(raw)
-        _index_to_opensearch(normalized)
+        normalized_docs = []
+        for raw in raw_docs:
+            normalized = _normalize_record(raw)
+            _index_to_opensearch(normalized)
+            normalized_docs.append(normalized)
 
-        encoded = base64.b64encode(
-            (json.dumps(normalized) + "\n").encode("utf-8")
-        ).decode("utf-8")
+        # Firehose supports returning multiple newline-delimited records in one output record
+        output_blob = "\n".join(json.dumps(doc) for doc in normalized_docs) + "\n"
+        encoded = base64.b64encode(output_blob.encode("utf-8")).decode("utf-8")
 
         return {
             "recordId": record_id,
             "result": "Ok",
             "data": encoded,
-        }
-    except json.JSONDecodeError as exc:
-        logger.error("Malformed JSON in Firehose record %s: %s", record_id, exc)
-        return {
-            "recordId": record_id,
-            "result": "ProcessingFailed",
-            "data": record["data"],
         }
     except Exception as exc:  # noqa: BLE001
         logger.error("Unexpected error processing Firehose record %s: %s", record_id, exc)

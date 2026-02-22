@@ -48,17 +48,12 @@ output "agent_state_table_name" {
   value       = aws_dynamodb_table.agent_state.name
 }
 
-output "opensearch_collection_endpoint" {
-  description = "OpenSearch Serverless collection endpoint"
-  value       = aws_opensearchserverless_collection.logs.collection_endpoint
+output "opensearch_domain_endpoint" {
+  description = "OpenSearch domain endpoint"
+  value       = aws_opensearch_domain.logs.endpoint
 }
 
-output "opensearch_collection_arn" {
-  description = "ARN of OpenSearch Serverless collection"
-  value       = aws_opensearchserverless_collection.logs.arn
-}
-
-output "opensearch_collection_id" {
-  description = "ID of OpenSearch Serverless collection"
-  value       = aws_opensearchserverless_collection.logs.id
+output "opensearch_domain_arn" {
+  description = "ARN of OpenSearch domain"
+  value       = aws_opensearch_domain.logs.arn
 }

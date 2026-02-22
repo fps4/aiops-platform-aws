@@ -1,4 +1,9 @@
-"""OpenSearch Serverless client with SigV4 authentication."""
+"""OpenSearch client with SigV4 authentication.
+
+Supports both OpenSearch Serverless (service name ``aoss``) and managed
+OpenSearch Service domains (service name ``es``). The service is selected via
+the ``OPENSEARCH_SERVICE`` environment variable (default: ``es``).
+"""
 import os
 from typing import Any
 
@@ -13,15 +18,16 @@ logger = get_logger("opensearch_client")
 class OpenSearchClient:
     """Wrapper around opensearch-py with AWS SigV4 auth for OpenSearch Serverless."""
 
-    def __init__(self, endpoint: str | None = None, region: str | None = None) -> None:
+    def __init__(self, endpoint: str | None = None, region: str | None = None, service: str | None = None) -> None:
         self._endpoint = (endpoint or os.environ["OPENSEARCH_ENDPOINT"]).rstrip("/")
         self._region = region or os.environ.get("AWS_REGION", "eu-central-1")
+        self._service = (service or os.environ.get("OPENSEARCH_SERVICE", "es")).lower()
 
         # Strip https:// for the host parameter
         host = self._endpoint.replace("https://", "").replace("http://", "")
 
         credentials = boto3.Session().get_credentials()
-        auth = AWSV4SignerAuth(credentials, self._region, "aoss")
+        auth = AWSV4SignerAuth(credentials, self._region, self._service)
 
         self._client = OpenSearch(
             hosts=[{"host": host, "port": 443}],

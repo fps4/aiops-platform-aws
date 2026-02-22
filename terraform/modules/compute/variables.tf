@@ -25,8 +25,14 @@ variable "ecs_task_execution_role_arn" {
 }
 
 variable "opensearch_endpoint" {
-  description = "OpenSearch Serverless collection endpoint"
+  description = "OpenSearch endpoint"
   type        = string
+}
+
+variable "opensearch_service" {
+  description = "OpenSearch SigV4 service name (es or aoss)"
+  type        = string
+  default     = "es"
 }
 
 variable "anomalies_table_name" {

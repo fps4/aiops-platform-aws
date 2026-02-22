@@ -14,10 +14,16 @@ variable "project_prefix" {
 variable "retention_days" {
   description = "Default retention period in days"
   type        = number
-  default     = 90
+  default     = 30
 }
 
 variable "central_account_id" {
   description = "AWS account ID for central observability account"
   type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region for resources"
+  type        = string
+  default     = "eu-central-1"
 }

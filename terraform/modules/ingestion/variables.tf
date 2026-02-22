@@ -30,8 +30,14 @@ variable "raw_logs_bucket_name" {
 }
 
 variable "opensearch_endpoint" {
-  description = "OpenSearch Serverless collection endpoint"
+  description = "OpenSearch endpoint"
   type        = string
+}
+
+variable "opensearch_service" {
+  description = "OpenSearch SigV4 service name (es or aoss)"
+  type        = string
+  default     = "es"
 }
 
 variable "aws_region" {

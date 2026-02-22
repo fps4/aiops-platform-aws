@@ -27,6 +27,7 @@ module "data_stores" {
   project_prefix     = var.project_prefix
   central_account_id = var.central_account_id
   retention_days     = var.retention_days
+  aws_region         = var.aws_region
 }
 
 # Ingestion Module
@@ -39,7 +40,7 @@ module "ingestion" {
   firehose_delivery_role_arn = module.iam.firehose_delivery_role_arn
   raw_logs_bucket_arn        = module.data_stores.raw_logs_bucket_arn
   raw_logs_bucket_name       = module.data_stores.raw_logs_bucket_name
-  opensearch_endpoint        = module.data_stores.opensearch_collection_endpoint
+  opensearch_endpoint        = module.data_stores.opensearch_domain_endpoint
   aws_region                 = var.aws_region
 }
 
@@ -52,7 +53,7 @@ module "compute" {
   lambda_execution_role_arn   = module.iam.lambda_execution_role_arn
   fargate_task_role_arn       = module.iam.fargate_task_role_arn
   ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
-  opensearch_endpoint         = module.data_stores.opensearch_collection_endpoint
+  opensearch_endpoint         = module.data_stores.opensearch_domain_endpoint
   anomalies_table_name        = module.data_stores.anomalies_table_name
   anomalies_table_stream_arn  = module.data_stores.anomalies_table_stream_arn
   agent_state_table_name      = module.data_stores.agent_state_table_name
@@ -107,7 +108,7 @@ resource "aws_ssm_parameter" "sensitivity_default" {
 resource "aws_ssm_parameter" "opensearch_endpoint" {
   name  = "/${var.project_prefix}/${var.environment}/opensearch_endpoint"
   type  = "String"
-  value = module.data_stores.opensearch_collection_endpoint
+  value = module.data_stores.opensearch_domain_endpoint
 
   tags = var.tags
 }

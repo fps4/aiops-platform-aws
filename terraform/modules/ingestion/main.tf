@@ -28,6 +28,7 @@ resource "aws_lambda_function" "log_normalizer" {
   environment {
     variables = {
       OPENSEARCH_ENDPOINT = var.opensearch_endpoint
+      OPENSEARCH_SERVICE  = var.opensearch_service
       RAW_LOGS_BUCKET     = var.raw_logs_bucket_name
       ENVIRONMENT         = var.environment
       PROJECT_PREFIX      = var.project_prefix

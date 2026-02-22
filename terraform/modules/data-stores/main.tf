@@ -29,11 +29,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "raw_logs" {
     expiration {
       days = var.retention_days
     }
-
-    transition {
-      days          = 7
-      storage_class = "GLACIER_IR"
-    }
   }
 }
 
@@ -323,88 +318,42 @@ resource "aws_dynamodb_table" "audit_logs" {
   }
 }
 
-# OpenSearch Serverless Collection
+# Managed OpenSearch domain (single t3.small.search for dev)
+resource "aws_opensearch_domain" "logs" {
+  domain_name    = "${var.project_prefix}-${var.environment}-logs"
+  engine_version = "OpenSearch_2.11"
 
-# Encryption policy
-resource "aws_opensearchserverless_security_policy" "encryption" {
-  name = "${var.project_prefix}-${var.environment}-encryption"
-  type = "encryption"
+  cluster_config {
+    instance_type          = "t3.small.search"
+    instance_count         = 1
+    zone_awareness_enabled = false
+  }
 
-  policy = jsonencode({
-    Rules = [
+  ebs_options {
+    ebs_enabled = true
+    volume_size = 20
+    volume_type = "gp3"
+  }
+
+  encrypt_at_rest { enabled = true }
+  node_to_node_encryption { enabled = true }
+
+  domain_endpoint_options {
+    enforce_https       = true
+    tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
+  }
+
+  access_policies = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
-        Resource = [
-          "collection/${var.project_prefix}-${var.environment}-logs"
-        ]
-        ResourceType = "collection"
+        Effect = "Allow"
+        Principal = { AWS = "arn:aws:iam::${var.central_account_id}:root" }
+        Action   = ["es:ESHttp*"]
+        Resource = "arn:aws:es:${var.aws_region}:${var.central_account_id}:domain/${var.project_prefix}-${var.environment}-logs/*"
       }
     ]
-    AWSOwnedKey = true
   })
-}
-
-# Network policy: public access (requests still require SigV4 IAM auth)
-resource "aws_opensearchserverless_security_policy" "network" {
-  name = "${var.project_prefix}-${var.environment}-network"
-  type = "network"
-
-  policy = jsonencode([
-    {
-      Rules = [
-        {
-          Resource     = ["collection/${var.project_prefix}-${var.environment}-logs"]
-          ResourceType = "collection"
-        },
-        {
-          Resource     = ["collection/${var.project_prefix}-${var.environment}-logs"]
-          ResourceType = "dashboard"
-        }
-      ]
-      AllowFromPublic = true
-    }
-  ])
-}
-
-# Data access policy
-resource "aws_opensearchserverless_access_policy" "data_access" {
-  name = "${var.project_prefix}-${var.environment}-data-access"
-  type = "data"
-
-  policy = jsonencode([
-    {
-      Rules = [
-        {
-          Resource = [
-            "index/${var.project_prefix}-${var.environment}-logs/*"
-          ]
-          Permission = [
-            "aoss:CreateIndex",
-            "aoss:DeleteIndex",
-            "aoss:UpdateIndex",
-            "aoss:DescribeIndex",
-            "aoss:ReadDocument",
-            "aoss:WriteDocument"
-          ]
-          ResourceType = "index"
-        }
-      ]
-      Principal = [
-        "arn:aws:iam::${var.central_account_id}:root"
-      ]
-    }
-  ])
-}
-
-# OpenSearch Serverless collection
-resource "aws_opensearchserverless_collection" "logs" {
-  name = "${var.project_prefix}-${var.environment}-logs"
-  type = "SEARCH"
-
-  depends_on = [
-    aws_opensearchserverless_security_policy.encryption,
-    aws_opensearchserverless_security_policy.network,
-    aws_opensearchserverless_access_policy.data_access
-  ]
 
   tags = {
     Name        = "${var.project_prefix}-${var.environment}-logs"

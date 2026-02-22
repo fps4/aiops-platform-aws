@@ -14,8 +14,8 @@ output "raw_logs_bucket_name" {
 }
 
 output "opensearch_endpoint" {
-  description = "OpenSearch Serverless collection endpoint"
-  value       = module.data_stores.opensearch_collection_endpoint
+  description = "OpenSearch domain endpoint"
+  value       = module.data_stores.opensearch_domain_endpoint
 }
 
 output "anomalies_table_name" {

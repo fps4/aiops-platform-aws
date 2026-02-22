@@ -118,6 +118,7 @@ resource "aws_ecs_task_definition" "statistical_detection" {
 
       environment = [
         { name = "OPENSEARCH_ENDPOINT", value = var.opensearch_endpoint },
+        { name = "OPENSEARCH_SERVICE",  value = var.opensearch_service },
         { name = "DYNAMODB_ANOMALIES_TABLE", value = var.anomalies_table_name },
         { name = "DYNAMODB_POLICY_TABLE", value = var.policy_store_table_name },
         { name = "ENVIRONMENT", value = var.environment },
@@ -261,6 +262,7 @@ resource "aws_lambda_function" "rule_detection" {
       DYNAMODB_EVENTS_TABLE    = var.events_table_name
       DYNAMODB_POLICY_TABLE    = var.policy_store_table_name
       OPENSEARCH_ENDPOINT      = var.opensearch_endpoint
+      OPENSEARCH_SERVICE       = var.opensearch_service
       ENVIRONMENT              = var.environment
     }
   }
@@ -323,6 +325,7 @@ resource "aws_lambda_function" "orchestrator" {
       DYNAMODB_AGENT_STATE_TABLE = var.agent_state_table_name
       DYNAMODB_EVENTS_TABLE      = var.events_table_name
       OPENSEARCH_ENDPOINT        = var.opensearch_endpoint
+      OPENSEARCH_SERVICE         = var.opensearch_service
       SLACK_WEBHOOK_SECRET_ARN   = var.slack_webhook_secret_arn
       ENVIRONMENT                = var.environment
     }

@@ -73,18 +73,18 @@ resource "aws_iam_role_policy" "lambda_aiops" {
           "s3:ListBucket"
         ]
         Resource = [
-          "arn:aws:s3:::${var.project_prefix}-${var.environment}-*",
-          "arn:aws:s3:::${var.project_prefix}-${var.environment}-*/*"
+          "arn:aws:s3:::${var.central_account_id}-${var.project_prefix}-${var.environment}-*",
+          "arn:aws:s3:::${var.central_account_id}-${var.project_prefix}-${var.environment}-*/*"
         ]
       },
       {
         Sid    = "OpenSearchAccess"
         Effect = "Allow"
         Action = [
-          "aoss:APIAccessAll"
+          "es:ESHttp*"
         ]
         Resource = [
-          "arn:aws:aoss:*:${var.central_account_id}:collection/*"
+          "arn:aws:es:*:${var.central_account_id}:domain/${var.project_prefix}-${var.environment}-logs/*"
         ]
       },
       {
@@ -158,10 +158,10 @@ resource "aws_iam_role_policy" "fargate_task_policy" {
         Sid    = "OpenSearchAccess"
         Effect = "Allow"
         Action = [
-          "aoss:APIAccessAll"
+          "es:ESHttp*"
         ]
         Resource = [
-          "arn:aws:aoss:*:${var.central_account_id}:collection/*"
+          "arn:aws:es:*:${var.central_account_id}:domain/${var.project_prefix}-${var.environment}-logs/*"
         ]
       },
       {
@@ -279,8 +279,8 @@ resource "aws_iam_role_policy" "firehose_delivery_policy" {
           "s3:ListBucket"
         ]
         Resource = [
-          "arn:aws:s3:::${var.project_prefix}-${var.environment}-raw-logs",
-          "arn:aws:s3:::${var.project_prefix}-${var.environment}-raw-logs/*"
+          "arn:aws:s3:::${var.central_account_id}-${var.project_prefix}-${var.environment}-raw-logs",
+          "arn:aws:s3:::${var.central_account_id}-${var.project_prefix}-${var.environment}-raw-logs/*"
         ]
       },
       {
@@ -291,6 +291,7 @@ resource "aws_iam_role_policy" "firehose_delivery_policy" {
         ]
         Resource = [
           "arn:aws:lambda:*:${var.central_account_id}:function:${var.project_prefix}-${var.environment}-log-normalizer"
+          ,"arn:aws:lambda:*:${var.central_account_id}:function:${var.project_prefix}-${var.environment}-log-normalizer:*"
         ]
       }
     ]
