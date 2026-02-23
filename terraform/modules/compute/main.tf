@@ -117,12 +117,12 @@ resource "aws_ecs_task_definition" "statistical_detection" {
       image = "${aws_ecr_repository.statistical_detection.repository_url}:latest"
 
       environment = [
-        { name = "OPENSEARCH_ENDPOINT", value = var.opensearch_endpoint },
-        { name = "OPENSEARCH_SERVICE",  value = var.opensearch_service },
+        { name = "CLICKHOUSE_HOST",          value = var.clickhouse_host },
+        { name = "CLICKHOUSE_PORT",          value = tostring(var.clickhouse_port) },
         { name = "DYNAMODB_ANOMALIES_TABLE", value = var.anomalies_table_name },
-        { name = "DYNAMODB_POLICY_TABLE", value = var.policy_store_table_name },
-        { name = "ENVIRONMENT", value = var.environment },
-        { name = "AWS_REGION", value = var.aws_region },
+        { name = "DYNAMODB_POLICY_TABLE",    value = var.policy_store_table_name },
+        { name = "ENVIRONMENT",              value = var.environment },
+        { name = "AWS_REGION",               value = var.aws_region },
       ]
 
       logConfiguration = {
@@ -261,8 +261,8 @@ resource "aws_lambda_function" "rule_detection" {
       DYNAMODB_ANOMALIES_TABLE = var.anomalies_table_name
       DYNAMODB_EVENTS_TABLE    = var.events_table_name
       DYNAMODB_POLICY_TABLE    = var.policy_store_table_name
-      OPENSEARCH_ENDPOINT      = var.opensearch_endpoint
-      OPENSEARCH_SERVICE       = var.opensearch_service
+      CLICKHOUSE_HOST          = var.clickhouse_host
+      CLICKHOUSE_PORT          = tostring(var.clickhouse_port)
       ENVIRONMENT              = var.environment
     }
   }
@@ -324,8 +324,9 @@ resource "aws_lambda_function" "orchestrator" {
       DYNAMODB_ANOMALIES_TABLE   = var.anomalies_table_name
       DYNAMODB_AGENT_STATE_TABLE = var.agent_state_table_name
       DYNAMODB_EVENTS_TABLE      = var.events_table_name
-      OPENSEARCH_ENDPOINT        = var.opensearch_endpoint
-      OPENSEARCH_SERVICE         = var.opensearch_service
+      CLICKHOUSE_HOST            = var.clickhouse_host
+      CLICKHOUSE_PORT            = tostring(var.clickhouse_port)
+      GRAFANA_URL                = var.grafana_url
       SLACK_WEBHOOK_SECRET_ARN   = var.slack_webhook_secret_arn
       ENVIRONMENT                = var.environment
     }
@@ -351,5 +352,160 @@ resource "aws_lambda_event_source_mapping" "anomalies_stream" {
     filter {
       pattern = jsonencode({ eventName = ["INSERT"] })
     }
+  }
+}
+
+# ─── Grafana (Fargate + internal ALB) ─────────────────────────────────────────
+
+resource "aws_cloudwatch_log_group" "grafana" {
+  name              = "/ecs/${local.name_prefix}-grafana"
+  retention_in_days = 14
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+# Security group for the Grafana ALB
+resource "aws_security_group" "grafana_alb" {
+  count       = length(var.fargate_subnet_ids) > 0 ? 1 : 0
+  name        = "${local.name_prefix}-grafana-alb"
+  description = "Allow inbound HTTP to Grafana ALB"
+  vpc_id      = data.aws_subnet.fargate_primary[0].vpc_id
+
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_lb" "grafana" {
+  count              = length(var.fargate_subnet_ids) > 0 ? 1 : 0
+  name               = "${local.name_prefix}-grafana"
+  internal           = true
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.grafana_alb[0].id]
+  subnets            = var.fargate_subnet_ids
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_lb_target_group" "grafana" {
+  count       = length(var.fargate_subnet_ids) > 0 ? 1 : 0
+  name        = "${local.name_prefix}-grafana"
+  port        = 3000
+  protocol    = "HTTP"
+  vpc_id      = data.aws_subnet.fargate_primary[0].vpc_id
+  target_type = "ip"
+
+  health_check {
+    path                = "/api/health"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    interval            = 30
+  }
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_lb_listener" "grafana" {
+  count             = length(var.fargate_subnet_ids) > 0 ? 1 : 0
+  load_balancer_arn = aws_lb.grafana[0].arn
+  port              = 3000
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.grafana[0].arn
+  }
+}
+
+resource "aws_ecs_task_definition" "grafana" {
+  family                   = "${local.name_prefix}-grafana"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 512
+  memory                   = 1024
+  task_role_arn            = var.fargate_task_role_arn
+  execution_role_arn       = var.ecs_task_execution_role_arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "grafana"
+      image     = "grafana/grafana:latest"
+      essential = true
+
+      portMappings = [{ containerPort = 3000, protocol = "tcp" }]
+
+      environment = [
+        { name = "GF_INSTALL_PLUGINS",      value = "grafana-clickhouse-datasource" },
+        { name = "GF_AUTH_ANONYMOUS_ENABLED", value = "false" },
+        { name = "CLICKHOUSE_HOST",           value = var.clickhouse_host },
+        { name = "CLICKHOUSE_PORT",           value = tostring(var.clickhouse_port) },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.grafana.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_ecs_service" "grafana" {
+  count           = length(var.fargate_subnet_ids) > 0 ? 1 : 0
+  name            = "${local.name_prefix}-grafana"
+  cluster         = aws_ecs_cluster.detection.id
+  task_definition = aws_ecs_task_definition.grafana.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    assign_public_ip = true
+    subnets          = var.fargate_subnet_ids
+    security_groups  = length(var.fargate_security_group_ids) > 0 ? var.fargate_security_group_ids : [aws_security_group.fargate_egress_all[0].id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.grafana[0].arn
+    container_name   = "grafana"
+    container_port   = 3000
+  }
+
+  depends_on = [aws_lb_listener.grafana]
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
   }
 }

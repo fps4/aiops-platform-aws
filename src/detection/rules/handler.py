@@ -1,6 +1,6 @@
 """Rule-based detection Lambda.
 
-Evaluates hard thresholds against current OpenSearch aggregations and writes
+Evaluates hard thresholds against current ClickHouse aggregations and writes
 anomaly records to DynamoDB when rules are breached.
 
 Trigger: can be invoked by CloudWatch Metric Alarms, EventBridge rules, or
@@ -18,11 +18,11 @@ from boto3.dynamodb.conditions import Attr, Key
 
 try:
     from src.shared.logger import get_logger
-    from src.shared.opensearch_client import OpenSearchClient
+    from src.shared.clickhouse_client import ClickHouseClient
 except ImportError:
     try:
         from shared.logger import get_logger          # type: ignore[no-redef]
-        from shared.opensearch_client import OpenSearchClient  # type: ignore[no-redef]
+        from shared.clickhouse_client import ClickHouseClient  # type: ignore[no-redef]
     except ImportError:
         def get_logger(name: str) -> logging.Logger:  # type: ignore[misc]
             logger = logging.getLogger(name)
@@ -30,7 +30,7 @@ except ImportError:
                 logger.addHandler(logging.StreamHandler())
                 logger.setLevel(logging.INFO)
             return logger
-        OpenSearchClient = None  # type: ignore[assignment,misc]
+        ClickHouseClient = None  # type: ignore[assignment,misc]
 
 logger = get_logger("rule-detection")
 
@@ -44,16 +44,16 @@ DEFAULT_TRAFFIC_DROP_WINDOW_MINUTES = 10
 DEFAULT_COOLDOWN_SECONDS = 300
 
 _dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "eu-central-1"))
-_opensearch = None
+_clickhouse = None
 
 
-def _get_opensearch():
-    global _opensearch
-    if _opensearch is None:
-        if OpenSearchClient is None:
-            raise RuntimeError("OpenSearchClient is not available")
-        _opensearch = OpenSearchClient()
-    return _opensearch
+def _get_clickhouse():
+    global _clickhouse
+    if _clickhouse is None:
+        if ClickHouseClient is None:
+            raise RuntimeError("ClickHouseClient is not available")
+        _clickhouse = ClickHouseClient()
+    return _clickhouse
 
 
 def _anomalies_table():
@@ -141,20 +141,16 @@ def _write_anomaly(
     return item
 
 
-def _index_anomaly_to_opensearch(opensearch, anomaly: dict[str, Any]) -> None:
-    """Index an anomaly document to OpenSearch. Skips DynamoDB-only fields."""
-    exclude = {"ttl"}
+def _insert_anomaly_to_clickhouse(ch, anomaly: dict[str, Any]) -> None:
+    """Insert an anomaly document to ClickHouse. Skips DynamoDB-only fields."""
+    exclude = {"ttl", "details"}
     doc = {k: v for k, v in anomaly.items() if k not in exclude}
-    date = anomaly["timestamp"][:10].replace("-", ".")
+    doc["details"] = json.dumps(anomaly.get("details", {}))
     try:
-        opensearch.index(
-            index=f"anomalies-{date}",
-            doc=doc,
-            doc_id=anomaly["anomaly_id"],
-        )
+        ch.insert("anomalies", [doc])
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "Failed to index anomaly to OpenSearch: id=%s error=%s",
+            "Failed to insert anomaly to ClickHouse: id=%s error=%s",
             anomaly["anomaly_id"], exc,
         )
 
@@ -162,7 +158,7 @@ def _index_anomaly_to_opensearch(opensearch, anomaly: dict[str, Any]) -> None:
 # ─── Rule evaluators ──────────────────────────────────────────────────────────
 
 def _check_error_rate(
-    opensearch,
+    ch,
     table,
     service: str,
     account_id: str,
@@ -173,30 +169,19 @@ def _check_error_rate(
     threshold = thresholds["error_rate_threshold"]
     cooldown = thresholds["cooldown_seconds"]
 
-    query = {
-        "size": 0,
-        "query": {
-            "bool": {
-                "must": [
-                    {"term": {"service": service}},
-                    {"range": {"timestamp": {"gte": f"now-{window}m"}}},
-                ]
-            }
-        },
-        "aggs": {
-            "total": {"value_count": {"field": "timestamp"}},
-            "errors": {
-                "filter": {"terms": {"log_level": ["ERROR", "CRITICAL"]}},
-                "aggs": {"count": {"value_count": {"field": "timestamp"}}},
-            },
-        },
-    }
+    sql = f"""
+        SELECT
+            count() AS total,
+            countIf(log_level IN ('ERROR', 'CRITICAL')) AS error_count
+        FROM aiops.logs
+        WHERE service = '{service}'
+          AND timestamp >= now() - INTERVAL {window} MINUTE
+    """
 
     try:
-        resp = opensearch.search(index=f"logs-{service}-*", body=query)
-        aggs = resp.get("aggregations", {})
-        total = aggs.get("total", {}).get("value", 0)
-        error_count = aggs.get("errors", {}).get("count", {}).get("value", 0)
+        rows = ch.query(sql)
+        total = int(rows[0]["total"]) if rows else 0
+        error_count = int(rows[0]["error_count"]) if rows else 0
     except Exception as exc:  # noqa: BLE001
         logger.error("Error rate query failed for %s: %s", service, exc)
         return None
@@ -229,7 +214,7 @@ def _check_error_rate(
 
 
 def _check_latency_regression(
-    opensearch,
+    ch,
     table,
     service: str,
     account_id: str,
@@ -240,55 +225,32 @@ def _check_latency_regression(
     multiplier = thresholds["latency_multiplier"]
     cooldown = thresholds["cooldown_seconds"]
 
-    current_query = {
-        "size": 0,
-        "query": {
-            "bool": {
-                "must": [
-                    {"term": {"service": service}},
-                    {"range": {"timestamp": {"gte": f"now-{window}m"}}},
-                ]
-            }
-        },
-        "aggs": {
-            "p95_latency": {"percentiles": {"field": "duration_ms", "percents": [95]}}
-        },
-    }
+    current_sql = f"""
+        SELECT quantile(0.95)(duration_ms) AS p95
+        FROM aiops.logs
+        WHERE service = '{service}'
+          AND timestamp >= now() - INTERVAL {window} MINUTE
+          AND duration_ms IS NOT NULL
+    """
 
-    baseline_query = {
-        "size": 0,
-        "query": {
-            "bool": {
-                "must": [
-                    {"term": {"service": service}},
-                    {"range": {"timestamp": {"gte": "now-7d", "lt": f"now-{window}m"}}},
-                ]
-            }
-        },
-        "aggs": {
-            "p95_latency": {"percentiles": {"field": "duration_ms", "percents": [95]}}
-        },
-    }
+    baseline_sql = f"""
+        SELECT quantile(0.95)(duration_ms) AS p95
+        FROM aiops.logs
+        WHERE service = '{service}'
+          AND timestamp >= now() - INTERVAL 7 DAY
+          AND timestamp < now() - INTERVAL {window} MINUTE
+          AND duration_ms IS NOT NULL
+    """
 
     try:
-        current_resp = opensearch.search(index=f"logs-{service}-*", body=current_query)
-        baseline_resp = opensearch.search(index=f"logs-{service}-*", body=baseline_query)
+        current_rows = ch.query(current_sql)
+        baseline_rows = ch.query(baseline_sql)
     except Exception as exc:  # noqa: BLE001
         logger.error("Latency query failed for %s: %s", service, exc)
         return None
 
-    current_p95 = (
-        current_resp.get("aggregations", {})
-        .get("p95_latency", {})
-        .get("values", {})
-        .get("95.0")
-    )
-    baseline_p95 = (
-        baseline_resp.get("aggregations", {})
-        .get("p95_latency", {})
-        .get("values", {})
-        .get("95.0")
-    )
+    current_p95 = current_rows[0]["p95"] if current_rows else None
+    baseline_p95 = baseline_rows[0]["p95"] if baseline_rows else None
 
     if current_p95 is None or baseline_p95 is None or baseline_p95 == 0:
         return None
@@ -319,7 +281,7 @@ def _check_latency_regression(
 
 
 def _check_traffic_drop(
-    opensearch,
+    ch,
     table,
     service: str,
     account_id: str,
@@ -330,26 +292,22 @@ def _check_traffic_drop(
     drop_threshold = thresholds["traffic_drop_threshold"]
     cooldown = thresholds["cooldown_seconds"]
 
-    query = {
-        "size": 0,
-        "query": {"bool": {"must": [{"term": {"service": service}}]}},
-        "aggs": {
-            "recent": {
-                "filter": {"range": {"timestamp": {"gte": f"now-{window}m"}}},
-                "aggs": {"count": {"value_count": {"field": "timestamp"}}},
-            },
-            "previous": {
-                "filter": {"range": {"timestamp": {"gte": f"now-{window * 2}m", "lt": f"now-{window}m"}}},
-                "aggs": {"count": {"value_count": {"field": "timestamp"}}},
-            },
-        },
-    }
+    sql = f"""
+        SELECT
+            countIf(timestamp >= now() - INTERVAL {window} MINUTE) AS recent_count,
+            countIf(
+                timestamp >= now() - INTERVAL {window * 2} MINUTE
+                AND timestamp < now() - INTERVAL {window} MINUTE
+            ) AS previous_count
+        FROM aiops.logs
+        WHERE service = '{service}'
+          AND timestamp >= now() - INTERVAL {window * 2} MINUTE
+    """
 
     try:
-        resp = opensearch.search(index=f"logs-{service}-*", body=query)
-        aggs = resp.get("aggregations", {})
-        recent_count = aggs.get("recent", {}).get("count", {}).get("value", 0)
-        previous_count = aggs.get("previous", {}).get("count", {}).get("value", 0)
+        rows = ch.query(sql)
+        recent_count = int(rows[0]["recent_count"]) if rows else 0
+        previous_count = int(rows[0]["previous_count"]) if rows else 0
     except Exception as exc:  # noqa: BLE001
         logger.error("Traffic drop query failed for %s: %s", service, exc)
         return None
@@ -384,48 +342,35 @@ def _check_traffic_drop(
 
 
 def _check_iam_policy_changes(
-    opensearch,
+    ch,
     table,
     account_id: str,
     thresholds: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Detect IAM policy changes from CloudTrail events in OpenSearch."""
+    """Detect IAM policy changes from CloudTrail events in ClickHouse."""
     cooldown = thresholds["cooldown_seconds"]
     anomalies = []
 
-    query = {
-        "size": 10,
-        "query": {
-            "bool": {
-                "must": [
-                    {
-                        "terms": {
-                            "message": [
-                                "CreatePolicy",
-                                "DeletePolicy",
-                                "AttachRolePolicy",
-                                "DetachRolePolicy",
-                                "PutRolePolicy",
-                                "DeleteRolePolicy",
-                            ]
-                        }
-                    },
-                    {"range": {"timestamp": {"gte": "now-15m"}}},
-                ]
-            }
-        },
-    }
+    sql = """
+        SELECT message, timestamp, account_id
+        FROM aiops.logs
+        WHERE service = 'cloudtrail'
+          AND message IN (
+              'CreatePolicy', 'DeletePolicy', 'AttachRolePolicy',
+              'DetachRolePolicy', 'PutRolePolicy', 'DeleteRolePolicy'
+          )
+          AND timestamp >= now() - INTERVAL 15 MINUTE
+        LIMIT 10
+    """
 
     try:
-        resp = opensearch.search(index="logs-cloudtrail-*", body=query)
-        hits = resp.get("hits", {}).get("hits", [])
+        hits = ch.query(sql)
     except Exception as exc:  # noqa: BLE001
         logger.error("IAM change query failed for account %s: %s", account_id, exc)
         return []
 
     for hit in hits:
-        source = hit.get("_source", {})
-        event_name = source.get("message", "IAMChange")
+        event_name = hit.get("message", "IAMChange")
 
         if _is_in_cooldown(table, f"iam_change:{event_name}", "iam", cooldown):
             continue
@@ -437,7 +382,7 @@ def _check_iam_policy_changes(
             account_id=account_id,
             description=f"IAM policy change detected: {event_name}",
             severity="medium",
-            details={"event_name": event_name, "source_event": source},
+            details={"event_name": event_name, "source_event": hit},
         )
         anomalies.append(anomaly)
 
@@ -459,7 +404,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     account_id = event.get("account_id") or os.environ.get("AWS_ACCOUNT_ID", "unknown")
     services = event.get("services", [])
 
-    opensearch = _get_opensearch()
+    ch = _get_clickhouse()
     table = _anomalies_table()
 
     detected: list[dict[str, Any]] = []
@@ -467,26 +412,26 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     for service in services:
         thresholds = _load_thresholds(service)
 
-        anomaly = _check_error_rate(opensearch, table, service, account_id, thresholds)
+        anomaly = _check_error_rate(ch, table, service, account_id, thresholds)
         if anomaly:
-            _index_anomaly_to_opensearch(opensearch, anomaly)
+            _insert_anomaly_to_clickhouse(ch, anomaly)
             detected.append(anomaly)
 
-        anomaly = _check_latency_regression(opensearch, table, service, account_id, thresholds)
+        anomaly = _check_latency_regression(ch, table, service, account_id, thresholds)
         if anomaly:
-            _index_anomaly_to_opensearch(opensearch, anomaly)
+            _insert_anomaly_to_clickhouse(ch, anomaly)
             detected.append(anomaly)
 
-        anomaly = _check_traffic_drop(opensearch, table, service, account_id, thresholds)
+        anomaly = _check_traffic_drop(ch, table, service, account_id, thresholds)
         if anomaly:
-            _index_anomaly_to_opensearch(opensearch, anomaly)
+            _insert_anomaly_to_clickhouse(ch, anomaly)
             detected.append(anomaly)
 
     iam_anomalies = _check_iam_policy_changes(
-        opensearch, table, account_id, _load_thresholds("iam")
+        ch, table, account_id, _load_thresholds("iam")
     )
     for iam_anomaly in iam_anomalies:
-        _index_anomaly_to_opensearch(opensearch, iam_anomaly)
+        _insert_anomaly_to_clickhouse(ch, iam_anomaly)
     detected.extend(iam_anomalies)
 
     logger.info(

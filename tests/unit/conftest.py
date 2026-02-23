@@ -114,32 +114,12 @@ def sample_policy() -> dict[str, Any]:
 # ─── Mock clients ─────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def mock_opensearch_client() -> MagicMock:
-    """Mock OpenSearchClient with canned aggregation responses."""
+def mock_clickhouse_client() -> MagicMock:
+    """Mock ClickHouseClient with canned query/insert responses."""
     client = MagicMock()
-
-    # Default search response: 1000 total, 60 errors → 6% error rate
-    client.search.return_value = {
-        "hits": {"total": {"value": 1000}},
-        "aggregations": {
-            "total": {"value": 1000},
-            "errors": {"count": {"value": 60}},
-            "p95_latency": {"values": {"95.0": 500.0}},
-            "recent": {"count": {"value": 100}},
-            "previous": {"count": {"value": 1000}},
-            "over_time": {
-                "buckets": [
-                    {
-                        "key_as_string": f"2026-02-{14 + i:02d}T00:00:00Z",
-                        "metric_value": {"value": 100.0 + i},
-                    }
-                    for i in range(7)
-                ]
-            },
-        },
-    }
-    client.index.return_value = {"result": "created"}
-    client.bulk_index.return_value = {"errors": False, "items": []}
+    # Default query: covers error rate (total=1000, errors=60 → 6%)
+    client.query.return_value = [{"total": 1000, "error_count": 60}]
+    client.insert.return_value = None
     return client
 
 

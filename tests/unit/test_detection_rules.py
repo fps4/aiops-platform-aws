@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-os.environ.setdefault("OPENSEARCH_ENDPOINT", "https://example.es.amazonaws.com")
+os.environ.setdefault("CLICKHOUSE_HOST", "clickhouse.aiops-test.local")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("AWS_REGION", "eu-central-1")
 os.environ.setdefault("DYNAMODB_ANOMALIES_TABLE", "aiops-test-anomalies")
@@ -15,19 +15,6 @@ from src.detection.rules import handler  # noqa: E402
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def _make_agg_response(total: int, errors: int, p95: float, recent: int, previous: int) -> dict:
-    return {
-        "hits": {"total": {"value": total}},
-        "aggregations": {
-            "total": {"value": total},
-            "errors": {"count": {"value": errors}},
-            "p95_latency": {"values": {"95.0": p95}},
-            "recent": {"count": {"value": recent}},
-            "previous": {"count": {"value": previous}},
-        },
-    }
-
 
 def _default_thresholds() -> dict[str, Any]:
     return {
@@ -42,40 +29,40 @@ def _default_thresholds() -> dict[str, Any]:
 
 
 @pytest.fixture(autouse=True)
-def reset_opensearch_singleton():
-    """Reset the module-level OpenSearch singleton between tests."""
-    handler._opensearch = None
+def reset_clickhouse_singleton():
+    """Reset the module-level ClickHouse singleton between tests."""
+    handler._clickhouse = None
     yield
-    handler._opensearch = None
+    handler._clickhouse = None
 
 
 # ─── Error rate ───────────────────────────────────────────────────────────────
 
 class TestErrorRateThreshold:
-    def test_error_rate_threshold_breach(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_error_rate_threshold_breach(self, mock_clickhouse_client, mock_dynamodb_table):
         """6% error rate (above 5% threshold) should write an anomaly."""
-        mock_opensearch_client.search.return_value = _make_agg_response(1000, 60, 200, 100, 100)
+        mock_clickhouse_client.query.return_value = [{"total": 1000, "error_count": 60}]
         result = handler._check_error_rate(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is not None
         assert result["rule_type"] == "error_rate"
         assert result["severity"] == "high"
         assert result["details"]["error_rate"] == pytest.approx(0.06)
 
-    def test_error_rate_below_threshold(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_error_rate_below_threshold(self, mock_clickhouse_client, mock_dynamodb_table):
         """4% error rate (below 5% threshold) should not produce an anomaly."""
-        mock_opensearch_client.search.return_value = _make_agg_response(1000, 40, 200, 100, 100)
+        mock_clickhouse_client.query.return_value = [{"total": 1000, "error_count": 40}]
         result = handler._check_error_rate(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is None
 
-    def test_error_rate_zero_total_no_anomaly(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_error_rate_zero_total_no_anomaly(self, mock_clickhouse_client, mock_dynamodb_table):
         """Zero log volume should not produce an anomaly."""
-        mock_opensearch_client.search.return_value = _make_agg_response(0, 0, 0, 0, 0)
+        mock_clickhouse_client.query.return_value = [{"total": 0, "error_count": 0}]
         result = handler._check_error_rate(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is None
 
@@ -83,39 +70,39 @@ class TestErrorRateThreshold:
 # ─── Latency regression ───────────────────────────────────────────────────────
 
 class TestLatencyRegressionDetection:
-    def test_latency_regression_detection(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_latency_regression_detection(self, mock_clickhouse_client, mock_dynamodb_table):
         """P95 > 2× baseline should trigger a latency anomaly."""
-        mock_opensearch_client.search.side_effect = [
-            {"aggregations": {"p95_latency": {"values": {"95.0": 500.0}}}},
-            {"aggregations": {"p95_latency": {"values": {"95.0": 200.0}}}},
+        mock_clickhouse_client.query.side_effect = [
+            [{"p95": 500.0}],
+            [{"p95": 200.0}],
         ]
         result = handler._check_latency_regression(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is not None
         assert result["rule_type"] == "latency_regression"
         assert result["details"]["current_p95_ms"] == 500.0
         assert result["details"]["baseline_p95_ms"] == 200.0
 
-    def test_latency_within_threshold_no_anomaly(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_latency_within_threshold_no_anomaly(self, mock_clickhouse_client, mock_dynamodb_table):
         """P95 = 1.5× baseline (below 2×) should not trigger."""
-        mock_opensearch_client.search.side_effect = [
-            {"aggregations": {"p95_latency": {"values": {"95.0": 300.0}}}},
-            {"aggregations": {"p95_latency": {"values": {"95.0": 200.0}}}},
+        mock_clickhouse_client.query.side_effect = [
+            [{"p95": 300.0}],
+            [{"p95": 200.0}],
         ]
         result = handler._check_latency_regression(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is None
 
-    def test_latency_missing_baseline_no_anomaly(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_latency_missing_baseline_no_anomaly(self, mock_clickhouse_client, mock_dynamodb_table):
         """No baseline data (None value) should not trigger."""
-        mock_opensearch_client.search.side_effect = [
-            {"aggregations": {"p95_latency": {"values": {"95.0": 500.0}}}},
-            {"aggregations": {"p95_latency": {"values": {"95.0": None}}}},
+        mock_clickhouse_client.query.side_effect = [
+            [{"p95": 500.0}],
+            [{"p95": None}],
         ]
         result = handler._check_latency_regression(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is None
 
@@ -123,45 +110,30 @@ class TestLatencyRegressionDetection:
 # ─── Traffic drop ─────────────────────────────────────────────────────────────
 
 class TestTrafficDropDetection:
-    def test_traffic_drop_detection(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_traffic_drop_detection(self, mock_clickhouse_client, mock_dynamodb_table):
         """85% traffic drop should trigger a critical anomaly."""
-        mock_opensearch_client.search.return_value = {
-            "aggregations": {
-                "recent": {"count": {"value": 15}},
-                "previous": {"count": {"value": 100}},
-            }
-        }
+        mock_clickhouse_client.query.return_value = [{"recent_count": 15, "previous_count": 100}]
         result = handler._check_traffic_drop(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is not None
         assert result["rule_type"] == "traffic_drop"
         assert result["severity"] == "critical"
         assert result["details"]["drop_ratio"] == pytest.approx(0.85)
 
-    def test_traffic_drop_below_threshold(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_traffic_drop_below_threshold(self, mock_clickhouse_client, mock_dynamodb_table):
         """50% drop (below 80% threshold) should not trigger."""
-        mock_opensearch_client.search.return_value = {
-            "aggregations": {
-                "recent": {"count": {"value": 50}},
-                "previous": {"count": {"value": 100}},
-            }
-        }
+        mock_clickhouse_client.query.return_value = [{"recent_count": 50, "previous_count": 100}]
         result = handler._check_traffic_drop(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is None
 
-    def test_traffic_drop_zero_previous_no_anomaly(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_traffic_drop_zero_previous_no_anomaly(self, mock_clickhouse_client, mock_dynamodb_table):
         """No historical traffic baseline → no anomaly."""
-        mock_opensearch_client.search.return_value = {
-            "aggregations": {
-                "recent": {"count": {"value": 0}},
-                "previous": {"count": {"value": 0}},
-            }
-        }
+        mock_clickhouse_client.query.return_value = [{"recent_count": 0, "previous_count": 0}]
         result = handler._check_traffic_drop(
-            mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+            mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
         )
         assert result is None
 
@@ -223,9 +195,9 @@ class TestAnomalyObjectSchema:
 # ─── Cooldown suppression ─────────────────────────────────────────────────────
 
 class TestCooldownSuppresssDuplicate:
-    def test_cooldown_suppresses_duplicate(self, mock_opensearch_client, mock_dynamodb_table):
+    def test_cooldown_suppresses_duplicate(self, mock_clickhouse_client, mock_dynamodb_table):
         """Second anomaly call within cooldown window should be suppressed."""
-        mock_opensearch_client.search.return_value = _make_agg_response(1000, 60, 200, 100, 100)
+        mock_clickhouse_client.query.return_value = [{"total": 1000, "error_count": 60}]
 
         call_count = {"n": 0}
 
@@ -235,10 +207,10 @@ class TestCooldownSuppresssDuplicate:
 
         with patch.object(handler, "_is_in_cooldown", side_effect=fake_cooldown):
             first = handler._check_error_rate(
-                mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+                mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
             )
             second = handler._check_error_rate(
-                mock_opensearch_client, mock_dynamodb_table, "api", "123", _default_thresholds()
+                mock_clickhouse_client, mock_dynamodb_table, "api", "123", _default_thresholds()
             )
 
         assert first is not None, "First detection should produce an anomaly"

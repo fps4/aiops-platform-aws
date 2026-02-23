@@ -1,4 +1,4 @@
-# Data Stores Module - S3, DynamoDB, OpenSearch Serverless
+# Data Stores Module - S3, DynamoDB, ClickHouse
 
 variable "environment" {
   description = "Environment name (dev, staging, prod)"
@@ -26,4 +26,10 @@ variable "aws_region" {
   description = "AWS region for resources"
   type        = string
   default     = "eu-central-1"
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs for the ClickHouse EC2 instance. When empty, ClickHouse resources are not created."
+  type        = list(string)
+  default     = []
 }

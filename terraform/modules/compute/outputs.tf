@@ -32,3 +32,8 @@ output "orchestrator_function_name" {
   description = "Name of the orchestrator Lambda function"
   value       = aws_lambda_function.orchestrator.function_name
 }
+
+output "grafana_url" {
+  description = "Grafana ALB URL (internal, port 3000)"
+  value       = length(aws_lb.grafana) > 0 ? "http://${aws_lb.grafana[0].dns_name}:3000" : ""
+}

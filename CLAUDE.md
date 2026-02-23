@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AWS-native AIOps platform: serverless observability control plane that ingests signals from multiple AWS accounts, applies hybrid anomaly detection (statistical + rule-based), orchestrates agentic RCA workflows via an orchestrator Lambda, and delivers Slack alerts with OpenSearch dashboard links.
+AWS-native AIOps platform: serverless observability control plane that ingests signals from multiple AWS accounts, applies hybrid anomaly detection (statistical + rule-based), orchestrates agentic RCA workflows via an orchestrator Lambda, and delivers Slack alerts with Grafana dashboard links.
 
 **Region**: eu-central-1 (single-region, all resources). **Python 3.13+**. **Terraform >= 1.5**.
 
@@ -47,13 +47,13 @@ scripts/load-policies.sh --file policies/default-policies.yaml
 ### Data Flow
 ```
 Member AWS Accounts → CloudWatch Logs → Subscription Filter → Kinesis Firehose
-  → Lambda (log-normalizer) → S3 (raw) + OpenSearch Serverless (indexed logs + metrics)
+  → Lambda (log-normalizer) → S3 (raw) + ClickHouse (ECS EC2, aiops.logs table)
   CloudTrail → CloudWatch Logs → same Kinesis Firehose pipeline
 ```
 
 ### Anomaly Detection → RCA Pipeline
 ```
-OpenSearch metrics → Fargate scheduled task (every 5 min):
+ClickHouse metrics → Fargate scheduled task (every 5 min):
                      STL baseline, Z-score, PELT changepoint
                    → Rule-based detection via Lambda (error rate, latency, security)
                    → DynamoDB anomalies table → DynamoDB Stream
@@ -61,6 +61,14 @@ OpenSearch metrics → Fargate scheduled task (every 5 min):
                      DetectionAgent → CorrelationAgent → HistoricalCompareAgent →
                      RCAAgent (Bedrock Claude) → RecommendationAgent → SlackNotifier
 ```
+
+### Observability Stack
+- **Storage**: ClickHouse (ECS EC2, t3.large, EBS gp3 100 GB) — tables `aiops.logs`, `aiops.anomalies`
+- **Dashboards**: Grafana (Fargate, internal ALB port 3000) with `grafana-clickhouse-datasource` plugin
+- **Client**: `src/shared/clickhouse_client.py` using `clickhouse-connect` (HTTP port 8123)
+- **Schema**: `scripts/init-clickhouse-schema.sql` — run once after ClickHouse starts
+- **Env vars**: `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT` (8123), `GRAFANA_URL`
+- **See**: `docs/decisions/001-observability-storage-and-visualization.md`
 
 ### AI Provider Abstraction
 - Abstract base class: `src/ai-provider/interface.py`
@@ -101,7 +109,7 @@ All logs normalized to: `{timestamp, account_id, region, service, environment, l
 
 ## Important Rules
 
-- Never modify the canonical log schema without migrating existing OpenSearch indices
+- Never modify the canonical log schema without migrating existing ClickHouse tables (`ALTER TABLE aiops.logs ADD COLUMN ...`)
 - Never add Lambda dependencies without updating the corresponding `requirements.txt` and rebuilding the deployment zip
 - Always load detection policies via YAML -> DynamoDB (never hardcode in Lambda)
 - Use IAM roles for all AWS auth (never hardcoded credentials)

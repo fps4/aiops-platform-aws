@@ -28,6 +28,7 @@ module "data_stores" {
   central_account_id = var.central_account_id
   retention_days     = var.retention_days
   aws_region         = var.aws_region
+  subnet_ids         = length(var.fargate_subnet_ids) > 0 ? var.fargate_subnet_ids : data.aws_subnets.default_public.ids
 }
 
 # Ingestion Module
@@ -40,7 +41,8 @@ module "ingestion" {
   firehose_delivery_role_arn = module.iam.firehose_delivery_role_arn
   raw_logs_bucket_arn        = module.data_stores.raw_logs_bucket_arn
   raw_logs_bucket_name       = module.data_stores.raw_logs_bucket_name
-  opensearch_endpoint        = module.data_stores.opensearch_domain_endpoint
+  clickhouse_host            = module.data_stores.clickhouse_host
+  clickhouse_port            = tonumber(module.data_stores.clickhouse_port)
   aws_region                 = var.aws_region
 }
 
@@ -53,7 +55,9 @@ module "compute" {
   lambda_execution_role_arn   = module.iam.lambda_execution_role_arn
   fargate_task_role_arn       = module.iam.fargate_task_role_arn
   ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
-  opensearch_endpoint         = module.data_stores.opensearch_domain_endpoint
+  clickhouse_host             = module.data_stores.clickhouse_host
+  clickhouse_port             = tonumber(module.data_stores.clickhouse_port)
+  grafana_url                 = module.compute.grafana_url
   anomalies_table_name        = module.data_stores.anomalies_table_name
   anomalies_table_stream_arn  = module.data_stores.anomalies_table_stream_arn
   agent_state_table_name      = module.data_stores.agent_state_table_name
@@ -105,10 +109,18 @@ resource "aws_ssm_parameter" "sensitivity_default" {
   tags = var.tags
 }
 
-resource "aws_ssm_parameter" "opensearch_endpoint" {
-  name  = "/${var.project_prefix}/${var.environment}/opensearch_endpoint"
+resource "aws_ssm_parameter" "clickhouse_host" {
+  name  = "/${var.project_prefix}/${var.environment}/clickhouse_host"
   type  = "String"
-  value = module.data_stores.opensearch_domain_endpoint
+  value = module.data_stores.clickhouse_host
+
+  tags = var.tags
+}
+
+resource "aws_ssm_parameter" "grafana_url" {
+  name  = "/${var.project_prefix}/${var.environment}/grafana_url"
+  type  = "String"
+  value = module.compute.grafana_url
 
   tags = var.tags
 }
@@ -173,14 +185,6 @@ resource "aws_ssm_parameter" "bedrock_recommendation_temperature" {
   type        = "String"
   value       = "0.3"
   description = "Temperature for recommendation agent"
-
-  tags = var.tags
-}
-
-resource "aws_ssm_parameter" "opensearch_application_endpoint" {
-  name  = "/${var.project_prefix}/${var.environment}/opensearch_application_endpoint"
-  type  = "String"
-  value = module.data_stores.opensearch_application_endpoint
 
   tags = var.tags
 }

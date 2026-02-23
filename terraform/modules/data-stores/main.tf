@@ -320,62 +320,299 @@ resource "aws_dynamodb_table" "audit_logs" {
   }
 }
 
-# Managed OpenSearch domain (single t3.small.search for dev)
-resource "aws_opensearch_domain" "logs" {
-  domain_name    = "${var.project_prefix}-${var.environment}-logs"
-  engine_version = "OpenSearch_2.11"
+# ─── ClickHouse (ECS EC2) ─────────────────────────────────────────────────────
 
-  cluster_config {
-    instance_type          = "t3.small.search"
-    instance_count         = 1
-    zone_awareness_enabled = false
+# Derive VPC from first subnet when subnets are supplied
+data "aws_subnet" "clickhouse_primary" {
+  count = length(var.subnet_ids) > 0 ? 1 : 0
+  id    = var.subnet_ids[0]
+}
+
+# Security group: allow ClickHouse HTTP (8123) from within the VPC
+resource "aws_security_group" "clickhouse" {
+  count       = length(var.subnet_ids) > 0 ? 1 : 0
+  name        = "${local.bucket_prefix}-clickhouse"
+  description = "Allow ClickHouse HTTP access from within VPC"
+  vpc_id      = data.aws_subnet.clickhouse_primary[0].vpc_id
+
+  ingress {
+    description = "ClickHouse HTTP interface"
+    from_port   = 8123
+    to_port     = 8123
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_subnet.clickhouse_primary[0].cidr_block]
   }
 
-  ebs_options {
-    ebs_enabled = true
-    volume_size = 20
-    volume_type = "gp3"
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
-
-  encrypt_at_rest { enabled = true }
-  node_to_node_encryption { enabled = true }
-
-  domain_endpoint_options {
-    enforce_https       = true
-    tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
-  }
-
-  access_policies = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = { AWS = "arn:aws:iam::${var.central_account_id}:root" }
-        Action   = ["es:ESHttp*"]
-        Resource = "arn:aws:es:${var.aws_region}:${var.central_account_id}:domain/${var.project_prefix}-${var.environment}-logs/*"
-      }
-    ]
-  })
 
   tags = {
-    Name        = "${var.project_prefix}-${var.environment}-logs"
+    Name        = "${local.bucket_prefix}-clickhouse"
     Environment = var.environment
     ManagedBy   = "terraform"
   }
 }
 
-# OpenSearch Application (cloud-hosted Dashboards UI with IAM auth)
-resource "aws_opensearch_application" "dashboards" {
-  name = "${var.project_prefix}-${var.environment}-dashboards"
+# IAM role and instance profile for ECS EC2 nodes
+resource "aws_iam_role" "clickhouse_ec2" {
+  count = length(var.subnet_ids) > 0 ? 1 : 0
+  name  = "${local.bucket_prefix}-clickhouse-ec2"
 
-  data_source {
-    data_source_arn         = aws_opensearch_domain.logs.arn
-    data_source_description = "AIOps platform OpenSearch domain"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  tags = { Environment = var.environment, ManagedBy = "terraform" }
+}
+
+resource "aws_iam_role_policy_attachment" "clickhouse_ec2_ecs" {
+  count      = length(var.subnet_ids) > 0 ? 1 : 0
+  role       = aws_iam_role.clickhouse_ec2[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+}
+
+resource "aws_iam_instance_profile" "clickhouse_ec2" {
+  count = length(var.subnet_ids) > 0 ? 1 : 0
+  name  = "${local.bucket_prefix}-clickhouse-ec2"
+  role  = aws_iam_role.clickhouse_ec2[0].name
+}
+
+# ECS-optimised Amazon Linux 2 AMI
+data "aws_ami" "ecs_optimized" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-ecs-hvm-*-x86_64-ebs"]
+  }
+}
+
+# EC2 Launch Template for ClickHouse
+resource "aws_launch_template" "clickhouse" {
+  count         = length(var.subnet_ids) > 0 ? 1 : 0
+  name_prefix   = "${local.bucket_prefix}-clickhouse-"
+  image_id      = data.aws_ami.ecs_optimized.id
+  instance_type = "t3.large"
+
+  iam_instance_profile {
+    arn = aws_iam_instance_profile.clickhouse_ec2[0].arn
   }
 
-  tags = {
-    Name        = "${var.project_prefix}-${var.environment}-dashboards"
-    Environment = var.environment
-    ManagedBy   = "terraform"
+  vpc_security_group_ids = [aws_security_group.clickhouse[0].id]
+
+  # EBS root volume
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      volume_size = 30
+      volume_type = "gp3"
+    }
   }
+
+  # Extra EBS volume for ClickHouse data
+  block_device_mappings {
+    device_name = "/dev/xvdb"
+    ebs {
+      volume_size = 100
+      volume_type = "gp3"
+    }
+  }
+
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    echo ECS_CLUSTER=${local.bucket_prefix}-clickhouse >> /etc/ecs/ecs.config
+    mkfs -t xfs /dev/xvdb
+    mkdir -p /var/lib/clickhouse
+    mount /dev/xvdb /var/lib/clickhouse
+    echo '/dev/xvdb /var/lib/clickhouse xfs defaults,nofail 0 2' >> /etc/fstab
+  EOF
+  )
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name        = "${local.bucket_prefix}-clickhouse"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
+# Auto Scaling Group (single instance for dev)
+resource "aws_autoscaling_group" "clickhouse" {
+  count               = length(var.subnet_ids) > 0 ? 1 : 0
+  name                = "${local.bucket_prefix}-clickhouse"
+  desired_capacity    = 1
+  min_size            = 1
+  max_size            = 1
+  vpc_zone_identifier = var.subnet_ids
+
+  launch_template {
+    id      = aws_launch_template.clickhouse[0].id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "AmazonECSManaged"
+    value               = ""
+    propagate_at_launch = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ECS Cluster for ClickHouse
+resource "aws_ecs_cluster" "clickhouse" {
+  count = length(var.subnet_ids) > 0 ? 1 : 0
+  name  = "${local.bucket_prefix}-clickhouse"
+
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+
+  tags = { Environment = var.environment, ManagedBy = "terraform" }
+}
+
+# ECS Capacity Provider backed by the ASG
+resource "aws_ecs_capacity_provider" "clickhouse_ec2" {
+  count = length(var.subnet_ids) > 0 ? 1 : 0
+  name  = "${local.bucket_prefix}-clickhouse-ec2"
+
+  auto_scaling_group_provider {
+    auto_scaling_group_arn = aws_autoscaling_group.clickhouse[0].arn
+
+    managed_scaling {
+      status          = "ENABLED"
+      target_capacity = 100
+    }
+  }
+}
+
+resource "aws_ecs_cluster_capacity_providers" "clickhouse" {
+  count              = length(var.subnet_ids) > 0 ? 1 : 0
+  cluster_name       = aws_ecs_cluster.clickhouse[0].name
+  capacity_providers = [aws_ecs_capacity_provider.clickhouse_ec2[0].name]
+
+  default_capacity_provider_strategy {
+    capacity_provider = aws_ecs_capacity_provider.clickhouse_ec2[0].name
+    weight            = 1
+  }
+}
+
+# Cloud Map for stable service-discovery DNS
+resource "aws_service_discovery_private_dns_namespace" "aiops" {
+  count = length(var.subnet_ids) > 0 ? 1 : 0
+  name  = "${var.project_prefix}-${var.environment}.local"
+  vpc   = data.aws_subnet.clickhouse_primary[0].vpc_id
+
+  tags = { Environment = var.environment, ManagedBy = "terraform" }
+}
+
+resource "aws_service_discovery_service" "clickhouse" {
+  count = length(var.subnet_ids) > 0 ? 1 : 0
+  name  = "clickhouse"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.aiops[0].id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+}
+
+# CloudWatch log group for ClickHouse ECS task
+resource "aws_cloudwatch_log_group" "clickhouse" {
+  count             = length(var.subnet_ids) > 0 ? 1 : 0
+  name              = "/ecs/${local.bucket_prefix}-clickhouse"
+  retention_in_days = 14
+
+  tags = { Environment = var.environment, ManagedBy = "terraform" }
+}
+
+# ECS Task Definition for ClickHouse (host networking for direct port access)
+resource "aws_ecs_task_definition" "clickhouse" {
+  count                 = length(var.subnet_ids) > 0 ? 1 : 0
+  family                = "${local.bucket_prefix}-clickhouse"
+  requires_compatibilities = ["EC2"]
+  network_mode          = "host"
+
+  container_definitions = jsonencode([
+    {
+      name      = "clickhouse"
+      image     = "clickhouse/clickhouse-server:latest"
+      essential = true
+
+      portMappings = [
+        { containerPort = 8123, hostPort = 8123, protocol = "tcp" },
+        { containerPort = 9000, hostPort = 9000, protocol = "tcp" }
+      ]
+
+      mountPoints = [
+        { sourceVolume = "clickhouse-data", containerPath = "/var/lib/clickhouse" }
+      ]
+
+      environment = [
+        { name = "CLICKHOUSE_DB", value = "aiops" }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.clickhouse[0].name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
+    }
+  ])
+
+  volume {
+    name      = "clickhouse-data"
+    host_path = "/var/lib/clickhouse"
+  }
+
+  tags = { Environment = var.environment, ManagedBy = "terraform" }
+}
+
+# ECS Service for ClickHouse with Cloud Map service discovery
+resource "aws_ecs_service" "clickhouse" {
+  count           = length(var.subnet_ids) > 0 ? 1 : 0
+  name            = "${local.bucket_prefix}-clickhouse"
+  cluster         = aws_ecs_cluster.clickhouse[0].id
+  task_definition = aws_ecs_task_definition.clickhouse[0].arn
+  desired_count   = 1
+
+  capacity_provider_strategy {
+    capacity_provider = aws_ecs_capacity_provider.clickhouse_ec2[0].name
+    weight            = 1
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.clickhouse[0].arn
+  }
+
+  depends_on = [aws_ecs_cluster_capacity_providers.clickhouse]
+
+  tags = { Environment = var.environment, ManagedBy = "terraform" }
 }

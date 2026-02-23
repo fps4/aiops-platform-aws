@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 # ── env vars ──────────────────────────────────────────────────────────────────
-os.environ.setdefault("OPENSEARCH_ENDPOINT", "https://example.es.amazonaws.com")
+os.environ.setdefault("CLICKHOUSE_HOST", "clickhouse.aiops-test.local")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("RAW_LOGS_BUCKET", "test-raw-logs")
 os.environ.setdefault("AWS_REGION", "eu-central-1")
@@ -47,14 +47,14 @@ def _decode_result_data(result: dict[str, Any]) -> dict[str, Any]:
     return json.loads(raw)
 
 
-# ── fixture: inject mock OpenSearch into handler singleton ────────────────────
+# ── fixture: inject mock ClickHouse into handler singleton ────────────────────
 
 @pytest.fixture(autouse=True)
-def inject_mock_opensearch(mock_opensearch_client):
+def inject_mock_clickhouse(mock_clickhouse_client):
     """Inject mock directly into the handler's module-level singleton."""
-    _handler_module._opensearch = mock_opensearch_client
+    _handler_module._clickhouse = mock_clickhouse_client
     yield
-    _handler_module._opensearch = None  # reset after each test
+    _handler_module._clickhouse = None  # reset after each test
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -24,15 +24,21 @@ variable "ecs_task_execution_role_arn" {
   type        = string
 }
 
-variable "opensearch_endpoint" {
-  description = "OpenSearch endpoint"
+variable "clickhouse_host" {
+  description = "ClickHouse hostname (Cloud Map DNS or IP)"
   type        = string
 }
 
-variable "opensearch_service" {
-  description = "OpenSearch SigV4 service name"
+variable "clickhouse_port" {
+  description = "ClickHouse HTTP port"
+  type        = number
+  default     = 8123
+}
+
+variable "grafana_url" {
+  description = "Grafana base URL for dashboard deep-links in Slack alerts"
   type        = string
-  default     = "es"
+  default     = ""
 }
 
 variable "anomalies_table_name" {

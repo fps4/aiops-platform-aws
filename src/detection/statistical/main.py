@@ -1,9 +1,10 @@
 """Fargate task entry point for statistical anomaly detection.
 
 Runs every 5 minutes via EventBridge Scheduler. For each active detection
-policy it queries a 7-day metric window from OpenSearch, applies STL + Z-score
+policy it queries a 7-day metric window from ClickHouse, applies STL + Z-score
 + PELT algorithms, and writes anomalies to DynamoDB.
 """
+import json
 import os
 import uuid
 from datetime import datetime, timezone
@@ -15,7 +16,7 @@ import pandas as pd
 
 from src.detection.statistical import algorithms
 from src.shared.logger import get_logger
-from src.shared.opensearch_client import OpenSearchClient
+from src.shared.clickhouse_client import ClickHouseClient
 
 logger = get_logger("statistical-detection")
 
@@ -50,50 +51,36 @@ def load_policies(table) -> list[dict[str, Any]]:
 # ─── Metric retrieval ─────────────────────────────────────────────────────────
 
 def _fetch_metric_series(
-    opensearch: OpenSearchClient,
+    ch: ClickHouseClient,
     service: str,
     metric_field: str,
     window_days: int = 7,
-    interval: str = "5m",
 ) -> pd.Series:
-    """Fetch a time-bucketed metric series from OpenSearch.
+    """Fetch a 5-minute-bucketed metric series from ClickHouse.
 
     Args:
-        opensearch: Initialised OpenSearch client.
-        service: Service name to filter on.
-        metric_field: Numeric field to aggregate (e.g. ``duration_ms``).
-        window_days: Look-back window in days.
-        interval: Date histogram interval.
+        ch:           Initialised ClickHouse client.
+        service:      Service name to filter on.
+        metric_field: Numeric column to aggregate (e.g. ``duration_ms``).
+        window_days:  Look-back window in days.
 
     Returns:
         Pandas Series indexed by UTC timestamp, values are bucket averages.
     """
-    query = {
-        "size": 0,
-        "query": {
-            "bool": {
-                "must": [
-                    {"term": {"service": service}},
-                    {"range": {"timestamp": {"gte": f"now-{window_days}d"}}},
-                ]
-            }
-        },
-        "aggs": {
-            "over_time": {
-                "date_histogram": {
-                    "field": "timestamp",
-                    "fixed_interval": interval,
-                    "min_doc_count": 1,
-                },
-                "aggs": {
-                    "metric_value": {"avg": {"field": metric_field}}
-                },
-            }
-        },
-    }
+    sql = f"""
+        SELECT
+            toStartOfInterval(timestamp, INTERVAL 5 MINUTE) AS ts,
+            avg({metric_field}) AS value
+        FROM aiops.logs
+        WHERE service = '{service}'
+          AND timestamp >= now() - INTERVAL {window_days} DAY
+          AND {metric_field} IS NOT NULL
+        GROUP BY ts
+        ORDER BY ts
+    """
 
     try:
-        resp = opensearch.search(index=f"logs-{service}-*", body=query)
+        rows = ch.query(sql)
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "Metric fetch failed",
@@ -101,15 +88,13 @@ def _fetch_metric_series(
         )
         return pd.Series(dtype=float)
 
-    buckets = resp.get("aggregations", {}).get("over_time", {}).get("buckets", [])
-    if not buckets:
+    if not rows:
         return pd.Series(dtype=float)
 
-    timestamps = [b["key_as_string"] for b in buckets]
-    values = [b.get("metric_value", {}).get("value") or 0.0 for b in buckets]
+    timestamps = pd.to_datetime([r["ts"] for r in rows], utc=True)
+    values = [float(r["value"] or 0.0) for r in rows]
 
-    index = pd.to_datetime(timestamps, utc=True)
-    return pd.Series(values, index=index, dtype=float)
+    return pd.Series(values, index=timestamps, dtype=float)
 
 
 # ─── Anomaly construction ─────────────────────────────────────────────────────
@@ -150,10 +135,10 @@ def _build_anomaly(
     }
 
 
-def _anomaly_for_opensearch(item: dict[str, Any]) -> dict[str, Any]:
-    """Convert a DynamoDB anomaly item to an OpenSearch-safe document.
+def _anomaly_for_clickhouse(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert a DynamoDB anomaly item to a ClickHouse-safe document.
 
-    Converts Decimal values to float (OpenSearch rejects DynamoDB Decimal types)
+    Converts Decimal values to float, serialises the details dict to JSON,
     and drops DynamoDB-specific fields like ttl.
     """
     def _convert(v: Any) -> Any:
@@ -166,8 +151,10 @@ def _anomaly_for_opensearch(item: dict[str, Any]) -> dict[str, Any]:
             return [_convert(i) for i in v]
         return v
 
-    exclude = {"ttl"}
-    return {k: _convert(v) for k, v in item.items() if k not in exclude}
+    exclude = {"ttl", "details"}
+    doc = {k: _convert(v) for k, v in item.items() if k not in exclude}
+    doc["details"] = json.dumps(_convert(item.get("details", {})))
+    return doc
 
 
 def _severity_from_z(z: float) -> str:
@@ -187,7 +174,7 @@ def run_detection() -> int:
     Returns:
         Total number of anomalies written.
     """
-    opensearch = OpenSearchClient()
+    ch = ClickHouseClient()
     policies = load_policies(_policy_table())
     anomalies_table = _anomalies_table()
     total_anomalies = 0
@@ -203,7 +190,7 @@ def run_detection() -> int:
                 extra={"service": service, "metric": metric_field, "sensitivity": sensitivity},
             )
 
-            series = _fetch_metric_series(opensearch, service, metric_field)
+            series = _fetch_metric_series(ch, service, metric_field)
             if len(series) < 10:
                 logger.info(
                     "Insufficient data for statistical detection",
@@ -223,16 +210,11 @@ def run_detection() -> int:
                 if algorithms.is_anomaly(score, sensitivity):
                     anomaly = _build_anomaly(policy, service, metric_field, score, [], current_value)
                     anomalies_table.put_item(Item=anomaly)
-                    date = anomaly["timestamp"][:10].replace("-", ".")
                     try:
-                        opensearch.index(
-                            index=f"anomalies-{date}",
-                            doc=_anomaly_for_opensearch(anomaly),
-                            doc_id=anomaly["anomaly_id"],
-                        )
+                        ch.insert("anomalies", [_anomaly_for_clickhouse(anomaly)])
                     except Exception as exc:  # noqa: BLE001
                         logger.warning(
-                            "Failed to index anomaly to OpenSearch",
+                            "Failed to insert anomaly to ClickHouse",
                             extra={"anomaly_id": anomaly["anomaly_id"], "error": str(exc)},
                         )
                     total_anomalies += 1
@@ -257,16 +239,11 @@ def run_detection() -> int:
                     policy, service, metric_field, z, changepoints, current_value
                 )
                 anomalies_table.put_item(Item=anomaly)
-                date = anomaly["timestamp"][:10].replace("-", ".")
                 try:
-                    opensearch.index(
-                        index=f"anomalies-{date}",
-                        doc=_anomaly_for_opensearch(anomaly),
-                        doc_id=anomaly["anomaly_id"],
-                    )
+                    ch.insert("anomalies", [_anomaly_for_clickhouse(anomaly)])
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
-                        "Failed to index anomaly to OpenSearch",
+                        "Failed to insert anomaly to ClickHouse",
                         extra={"anomaly_id": anomaly["anomaly_id"], "error": str(exc)},
                     )
                 total_anomalies += 1

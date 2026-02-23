@@ -1,12 +1,12 @@
-"""Detection Agent — enriches the anomaly with recent error logs from OpenSearch."""
+"""Detection Agent — enriches the anomaly with recent error logs from ClickHouse."""
 import os
 from datetime import datetime, timedelta, timezone
 
 try:
-    from shared.opensearch_client import OpenSearchClient
+    from shared.clickhouse_client import ClickHouseClient
     from shared.logger import get_logger
 except ImportError:
-    OpenSearchClient = None  # type: ignore[assignment,misc]
+    ClickHouseClient = None  # type: ignore[assignment,misc]
     import logging
 
     def get_logger(name: str):  # type: ignore[misc]
@@ -25,29 +25,24 @@ def run(ctx: dict) -> dict:
     timestamp = anomaly.get("timestamp", datetime.now(timezone.utc).isoformat())
 
     recent_logs: list = []
-    if OpenSearchClient is not None:
+    if ClickHouseClient is not None:
         try:
-            client = OpenSearchClient()
+            client = ClickHouseClient()
             anomaly_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-            window_start = (anomaly_time - timedelta(minutes=30)).isoformat()
-            window_end = (anomaly_time + timedelta(minutes=5)).isoformat()
+            window_start = (anomaly_time - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+            window_end = (anomaly_time + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
 
-            query = {
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"term": {"service": service}},
-                            {"terms": {"log_level": ["ERROR", "CRITICAL"]}},
-                            {"range": {"timestamp": {"gte": window_start, "lte": window_end}}},
-                        ]
-                    }
-                },
-                "size": 50,
-                "sort": [{"timestamp": {"order": "desc"}}],
-            }
-            result = client.search(f"logs-{service}-*", query)
-            hits = result.get("hits", {}).get("hits", [])
-            recent_logs = [h["_source"] for h in hits]
+            sql = f"""
+                SELECT *
+                FROM aiops.logs
+                WHERE service = '{service}'
+                  AND log_level IN ('ERROR', 'CRITICAL')
+                  AND timestamp >= '{window_start}'
+                  AND timestamp <= '{window_end}'
+                ORDER BY timestamp DESC
+                LIMIT 50
+            """
+            recent_logs = client.query(sql)
         except Exception as exc:
             logger.warning("Could not fetch recent logs", extra={"error": str(exc)})
 

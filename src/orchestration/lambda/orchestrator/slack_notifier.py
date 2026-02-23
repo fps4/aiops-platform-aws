@@ -34,16 +34,15 @@ def _webhook_url() -> str:
     return secret["webhook_url"]
 
 
-def _build_dashboard_url(opensearch_endpoint: str, anomaly: dict) -> str:
-    """Build a deep-link URL to the RCA Evidence Explorer dashboard.
+def _build_dashboard_url(grafana_url: str, anomaly: dict) -> str:
+    """Build a deep-link URL to the Grafana RCA Evidence Explorer dashboard.
 
     Adds a ±30-minute time window around the anomaly timestamp and filters
     by service so the dashboard opens pre-filtered to the relevant incident.
     """
-    if not opensearch_endpoint:
+    if not grafana_url:
         return ""
 
-    anomaly_id = anomaly.get("anomaly_id", "")
     service = anomaly.get("service", "")
     ts_str = anomaly.get("timestamp", "")
 
@@ -52,23 +51,16 @@ def _build_dashboard_url(opensearch_endpoint: str, anomaly: dict) -> str:
     except (ValueError, AttributeError):
         ts = datetime.now(timezone.utc)
 
-    time_from = (ts - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    time_to = (ts + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    from_ms = int((ts - timedelta(minutes=30)).timestamp() * 1000)
+    to_ms = int((ts + timedelta(minutes=30)).timestamp() * 1000)
 
-    filters = (
-        f"!((query:(match_phrase:(service:'{service}'))))"
-        if service
-        else "!()"
-    )
-    global_state = f"(time:(from:'{time_from}',to:'{time_to}'))"
-    app_state = f"(filters:{filters})"
-
-    base = f"https://{opensearch_endpoint}/_dashboards/app/dashboards"
     params = urllib.parse.urlencode({
-        "_g": global_state,
-        "_a": app_state,
+        "var-service": service,
+        "from": from_ms,
+        "to": to_ms,
     })
-    return f"{base}#/view/rca-evidence-explorer?{params}"
+    base = grafana_url.rstrip("/")
+    return f"{base}/d/rca-evidence/rca-evidence-explorer?{params}"
 
 
 def notify(ctx: dict) -> None:
@@ -96,8 +88,8 @@ def notify(ctx: dict) -> None:
     root_cause = rca.get("root_cause", anomaly.get("description", "N/A"))
     confidence = rca.get("confidence", "N/A")
 
-    opensearch_endpoint = os.environ.get("OPENSEARCH_ENDPOINT", "")
-    dashboard_url = _build_dashboard_url(opensearch_endpoint, anomaly)
+    grafana_url = os.environ.get("GRAFANA_URL", "")
+    dashboard_url = _build_dashboard_url(grafana_url, anomaly)
 
     blocks: list = [
         {

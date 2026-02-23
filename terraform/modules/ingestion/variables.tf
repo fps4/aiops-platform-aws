@@ -29,15 +29,15 @@ variable "raw_logs_bucket_name" {
   type        = string
 }
 
-variable "opensearch_endpoint" {
-  description = "OpenSearch endpoint"
+variable "clickhouse_host" {
+  description = "ClickHouse hostname (Cloud Map DNS or IP)"
   type        = string
 }
 
-variable "opensearch_service" {
-  description = "OpenSearch SigV4 service name"
-  type        = string
-  default     = "es"
+variable "clickhouse_port" {
+  description = "ClickHouse HTTP port"
+  type        = number
+  default     = 8123
 }
 
 variable "aws_region" {

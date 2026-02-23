@@ -48,22 +48,17 @@ output "agent_state_table_name" {
   value       = aws_dynamodb_table.agent_state.name
 }
 
-output "opensearch_domain_endpoint" {
-  description = "OpenSearch domain endpoint"
-  value       = aws_opensearch_domain.logs.endpoint
+output "clickhouse_host" {
+  description = "ClickHouse service-discovery hostname (resolvable within VPC via Cloud Map)"
+  value       = length(aws_service_discovery_private_dns_namespace.aiops) > 0 ? "clickhouse.${aws_service_discovery_private_dns_namespace.aiops[0].name}" : ""
 }
 
-output "opensearch_domain_arn" {
-  description = "ARN of OpenSearch domain"
-  value       = aws_opensearch_domain.logs.arn
+output "clickhouse_port" {
+  description = "ClickHouse HTTP port"
+  value       = "8123"
 }
 
-output "opensearch_application_endpoint" {
-  description = "OpenSearch Application endpoint (Dashboards UI)"
-  value       = aws_opensearch_application.dashboards.endpoint
-}
-
-output "opensearch_application_id" {
-  description = "OpenSearch Application ID"
-  value       = aws_opensearch_application.dashboards.id
+output "clickhouse_security_group_id" {
+  description = "ID of the ClickHouse security group"
+  value       = length(aws_security_group.clickhouse) > 0 ? aws_security_group.clickhouse[0].id : ""
 }

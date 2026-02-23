@@ -78,16 +78,6 @@ resource "aws_iam_role_policy" "lambda_aiops" {
         ]
       },
       {
-        Sid    = "OpenSearchAccess"
-        Effect = "Allow"
-        Action = [
-          "es:ESHttp*"
-        ]
-        Resource = [
-          "arn:aws:es:*:${var.central_account_id}:domain/${var.project_prefix}-${var.environment}-logs/*"
-        ]
-      },
-      {
         Sid    = "SecretsManagerAccess"
         Effect = "Allow"
         Action = [
@@ -154,16 +144,6 @@ resource "aws_iam_role_policy" "fargate_task_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Sid    = "OpenSearchAccess"
-        Effect = "Allow"
-        Action = [
-          "es:ESHttp*"
-        ]
-        Resource = [
-          "arn:aws:es:*:${var.central_account_id}:domain/${var.project_prefix}-${var.environment}-logs/*"
-        ]
-      },
       {
         Sid    = "DynamoDBWriteAnomalies"
         Effect = "Allow"

@@ -1,7 +1,7 @@
 """Kinesis Firehose data transformation Lambda.
 
 Decodes each Firehose record, normalizes it to the canonical log schema,
-indexes the normalized document into OpenSearch, and returns the transformed
+inserts the normalized documents into ClickHouse, and returns the transformed
 records back to Firehose so that Firehose can write them to S3.
 """
 import base64
@@ -16,12 +16,12 @@ from typing import Any, Iterable, List
 # or when included in the Lambda deployment package.
 try:
     from src.shared.logger import get_logger
-    from src.shared.opensearch_client import OpenSearchClient
+    from src.shared.clickhouse_client import ClickHouseClient
 except ImportError:
     # Fallback: shared code bundled alongside this handler in the Lambda zip
     try:
         from shared.logger import get_logger          # type: ignore[no-redef]
-        from shared.opensearch_client import OpenSearchClient  # type: ignore[no-redef]
+        from shared.clickhouse_client import ClickHouseClient  # type: ignore[no-redef]
     except ImportError:
         # Last-resort: plain stdlib logger so the Lambda can still function
         def get_logger(name: str) -> logging.Logger:  # type: ignore[misc]
@@ -32,11 +32,11 @@ except ImportError:
                 logger.setLevel(logging.INFO)
             return logger
 
-        class _StubOS:  # type: ignore[misc]
-            def index(self, *_, **__):
+        class _StubCH:  # type: ignore[misc]
+            def insert(self, *_, **__):
                 pass
 
-        OpenSearchClient = _StubOS  # type: ignore[assignment,misc]
+        ClickHouseClient = _StubCH  # type: ignore[assignment,misc]
 
 logger = get_logger("log-normalizer")
 
@@ -65,17 +65,17 @@ _LOG_LEVEL_KEYWORDS = {
     "fatal": "CRITICAL",
 }
 
-# Module-level singleton; replaced in tests via ``handler._opensearch = mock``
-_opensearch = None
+# Module-level singleton; replaced in tests via ``handler._clickhouse = mock``
+_clickhouse = None
 
 
-def _get_opensearch():
-    global _opensearch
-    if _opensearch is None:
-        if OpenSearchClient is None:
-            raise RuntimeError("OpenSearchClient is not available")
-        _opensearch = OpenSearchClient()
-    return _opensearch
+def _get_clickhouse():
+    global _clickhouse
+    if _clickhouse is None:
+        if ClickHouseClient is None:
+            raise RuntimeError("ClickHouseClient is not available")
+        _clickhouse = ClickHouseClient()
+    return _clickhouse
 
 
 def _extract_log_level(raw: dict[str, Any]) -> str:
@@ -110,19 +110,16 @@ def _normalize_record(raw: dict[str, Any]) -> dict[str, Any]:
         "deployment_timestamp": raw.get("deployment_timestamp") or "",
         "related_events": raw.get("related_events") or [],
         # Preserve extra fields so no data is lost
-        "_raw": {k: v for k, v in raw.items() if k not in CANONICAL_FIELDS},
+        "_raw": json.dumps({k: v for k, v in raw.items() if k not in CANONICAL_FIELDS}),
     }
 
 
-def _index_to_opensearch(doc: dict[str, Any]) -> None:
-    """Index a normalized document to OpenSearch."""
-    service = doc.get("service", "unknown")
-    date = doc.get("timestamp", "")[:10].replace("-", ".")
-    index = f"logs-{service}-{date}"
+def _insert_to_clickhouse(docs: list[dict[str, Any]]) -> None:
+    """Insert normalized documents to ClickHouse."""
     try:
-        _get_opensearch().index(index=index, doc=doc)
+        _get_clickhouse().insert("logs", docs)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to index document to OpenSearch: %s (index=%s)", exc, index)
+        logger.warning("Failed to insert %d document(s) to ClickHouse: %s", len(docs), exc)
 
 
 def _decode_record_data(data_b64: str) -> bytes:
@@ -177,16 +174,29 @@ def _process_record(record: dict[str, Any]) -> dict[str, Any]:
     try:
         payload = _decode_record_data(record["data"])
 
+        if not payload.strip():
+            return {"recordId": record_id, "result": "Dropped", "data": record["data"]}
+
         raw_docs: List[dict[str, Any]] = []
-        # CWL subscription delivers gzipped JSON with logEvents
+        # CWL subscription delivers gzipped JSON with a logEvents array.
+        # If CWL parsing raises an exception the payload is malformed; record it
+        # so that a plain-JSON fallback failure can escalate to ProcessingFailed.
+        _cwl_exc: Exception | None = None
         try:
             raw_docs = list(_parse_cwl_subscription(payload))
-        except Exception:
-            # Not a CWL subscription payload; try plain JSON
+        except Exception as exc:
+            _cwl_exc = exc
+
+        if not raw_docs:
+            # Fall back to plain JSON (non-CWL Firehose records or CWL with no events).
             try:
                 raw_json = json.loads(payload.decode("utf-8").strip())
-                raw_docs = [raw_json]
+                if isinstance(raw_json, dict):
+                    raw_docs = [raw_json]
             except Exception:
+                if _cwl_exc is not None:
+                    # Both CWL and plain JSON parsing failed → propagate for ProcessingFailed
+                    raise _cwl_exc
                 raw_docs = []
 
         if not raw_docs:
@@ -196,11 +206,8 @@ def _process_record(record: dict[str, Any]) -> dict[str, Any]:
                 "data": record["data"],
             }
 
-        normalized_docs = []
-        for raw in raw_docs:
-            normalized = _normalize_record(raw)
-            _index_to_opensearch(normalized)
-            normalized_docs.append(normalized)
+        normalized_docs = [_normalize_record(raw) for raw in raw_docs]
+        _insert_to_clickhouse(normalized_docs)
 
         # Firehose supports returning multiple newline-delimited records in one output record
         output_blob = "\n".join(json.dumps(doc) for doc in normalized_docs) + "\n"

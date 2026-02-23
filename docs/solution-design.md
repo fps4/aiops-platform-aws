@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-The AIOps Platform is a **centralized observability control plane** that ingests signals from multiple AWS accounts, applies hybrid anomaly detection, orchestrates agentic RCA workflows, and delivers proactive alerts via Slack with OpenSearch dashboard integration.
+The AIOps Platform is a **centralized observability control plane** that ingests signals from multiple AWS accounts, applies hybrid anomaly detection, orchestrates agentic RCA workflows, and delivers proactive alerts via Slack with Grafana dashboard integration.
 
 **Architecture Principles**:
 - **AWS-native**: Leverage managed services to minimize operational overhead
@@ -10,6 +10,9 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 - **Deterministic orchestration**: Workflows are replayable, auditable, and transparent
 - **Pluggable AI**: Support multiple AI providers via unified abstraction layer
 - **Multi-account by design**: Central observability account with cross-account read roles
+
+**Architecture Decisions**:
+- [ADR-001: Observability Storage and Visualization Stack](decisions/001-observability-storage-and-visualization.md) — rationale for ClickHouse (ECS EC2) + Grafana (Fargate) over OpenSearch Serverless
 
 ---
 
@@ -45,8 +48,8 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 │  │  └───────────────┘      └───────┬───────┘   └──────────────┘ │        │
 │  │                                 │                              │        │
 │  │                         ┌───────▼───────┐                      │        │
-│  │                         │ OpenSearch    │◀─── Search/Viz       │        │
-│  │                         │ Serverless    │     Logs + Metrics   │        │
+│  │                         │ ClickHouse    │◀─── Analytics/Viz    │        │
+│  │                         │ (ECS EC2)     │     Logs + Metrics   │        │
 │  │                         └───────────────┘                      │        │
 │  │                                                                │        │
 │  │                         ┌───────────────┐                      │        │
@@ -60,7 +63,7 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 │  │  ┌─────────────────────────────────────────────────────┐       │       │
 │  │  │  Statistical Detectors (Fargate Scheduled Task)     │       │       │
 │  │  │  • Runs every 5 min via EventBridge Scheduler       │       │       │
-│  │  │  • Queries OpenSearch for 7-day baselines           │       │       │
+│  │  │  • Queries ClickHouse for 7-day baselines           │       │       │
 │  │  │  • STL decomposition, PELT, Z-score/EWMA           │       │       │
 │  │  │  • Iterates all services/metrics in single run      │       │       │
 │  │  └───────────────────────┬─────────────────────────────┘       │       │
@@ -111,18 +114,18 @@ The AIOps Platform is a **centralized observability control plane** that ingests
 │  │  │  Slack Bot (Lambda)                                │        │       │
 │  │  │  • Webhook handler for incoming notifications      │        │       │
 │  │  │  • Formats RCA payload with markdown              │        │       │
-│  │  │  • Generates OpenSearch dashboard deep-link        │        │       │
+│  │  │  • Generates Grafana dashboard deep-link           │        │       │
 │  │  │  • (Phase 1) Screenshot via headless browser      │        │       │
 │  │  │  • Posts to #aiops-alerts channel                 │        │       │
 │  │  └────────────────────────────────────────────────────┘        │       │
 │  │                                                                 │       │
 │  │  ┌────────────────────────────────────────────────────┐        │       │
-│  │  │  OpenSearch Dashboards                             │        │       │
+│  │  │  Grafana (Fargate, ALB-fronted)                    │        │       │
 │  │  │  • Unified incident timeline (pre-built)           │        │       │
 │  │  │  • Anomaly detection results (pre-built)           │        │       │
 │  │  │  • RCA evidence explorer (pre-built)               │        │       │
-│  │  │  • IAM-authenticated access (Platform/SRE only)    │        │       │
-│  │  │  • Deep-linkable with query parameters             │        │       │
+│  │  │  • ClickHouse datasource (SQL queries)             │        │       │
+│  │  │  • Deep-linkable with variable + time params       │        │       │
 │  │  └────────────────────────────────────────────────────┘        │       │
 │  └─────────────────────────────────────────────────────────────────┘       │
 │                                                                            │
@@ -165,8 +168,8 @@ CloudTrail writes to CloudWatch Logs, so all events (deployments, autoscaling, c
 | Signal           | Storage                  | Retention          | Purpose                          |
 |------------------|--------------------------|--------------------|----------------------------------|
 | **Raw Logs**     | S3 (Glacier after 7d)    | 90 days (config)   | Audit, replay, cost optimization |
-| **Indexed Logs** | OpenSearch Serverless    | 90 days (config)   | Search, visualization, alerting  |
-| **Metrics**      | OpenSearch Serverless    | 90 days (config)   | Time-series aggregations, baselines |
+| **Indexed Logs** | ClickHouse (ECS EC2)     | 90 days (config)   | Search, visualization, alerting  |
+| **Metrics**      | ClickHouse (ECS EC2)     | 90 days (config)   | Time-series aggregations, baselines |
 | **Events**       | DynamoDB                 | 90 days (TTL)      | Correlation, audit trail         |
 | **Anomalies**    | DynamoDB                 | 90 days (TTL)      | RCA workflow input, dashboards   |
 | **Agent State**  | DynamoDB                 | 30 days (TTL)      | Workflow orchestration, retries  |
@@ -193,7 +196,7 @@ CloudTrail writes to CloudWatch Logs, so all events (deployments, autoscaling, c
 2. Extract account_id, region, service from log metadata
 3. Lookup deployment version from DynamoDB (deployment event store)
 4. Add environment tag from AWS Tags API
-5. Write to OpenSearch + S3
+5. Write to ClickHouse HTTP API + S3
 
 ---
 
@@ -201,20 +204,20 @@ CloudTrail writes to CloudWatch Logs, so all events (deployments, autoscaling, c
 
 #### **Statistical Detection** (Fargate Scheduled Task)
 
-A single Fargate container runs on a fixed schedule (every 5 minutes via EventBridge Scheduler → ECS RunTask). Each run iterates over all monitored services and metrics, queries OpenSearch for historical baselines, runs detection algorithms, and writes anomalies to DynamoDB.
+A single Fargate container runs on a fixed schedule (every 5 minutes via EventBridge Scheduler → ECS RunTask). Each run iterates over all monitored services and metrics, queries ClickHouse for historical baselines, runs detection algorithms, and writes anomalies to DynamoDB.
 
 **Why Fargate over Lambda**:
 - **Heavy dependencies**: STL (`statsmodels`), PELT (`ruptures`), `numpy`/`scipy` exceed Lambda's 250MB unzipped limit
 - **Batch-oriented**: Detection algorithms need full 7-day windows — periodic batch, not event-driven
-- **In-memory efficiency**: Single process iterates all services/metrics, caching OpenSearch connections and shared state within a run
+- **In-memory efficiency**: Single process iterates all services/metrics, caching ClickHouse connections and shared state within a run
 - **No fan-out complexity**: One container processes everything vs orchestrating hundreds of concurrent Lambdas
 - **Cost**: ~$1-3/month (256 CPU, 512MB, runs 1-2 min every 5 min)
 
 **Container Spec**:
-- **Image**: Python 3.13 with `statsmodels`, `ruptures`, `numpy`, `scipy`, `opensearch-py`, `boto3`
+- **Image**: Python 3.13 with `statsmodels`, `ruptures`, `numpy`, `scipy`, `httpx`, `boto3`
 - **Resources**: 256 CPU units, 512MB memory
 - **Schedule**: EventBridge Scheduler rule, rate(5 minutes)
-- **Networking**: Private subnet, VPC endpoint access to OpenSearch and DynamoDB
+- **Networking**: Private subnet, HTTPS egress to ClickHouse HTTP API and DynamoDB
 - **Timeout**: 5 minutes (must complete before next scheduled run)
 
 **Algorithms**:
@@ -232,21 +235,36 @@ A single Fargate container runs on a fixed schedule (every 5 minutes via EventBr
 ```python
 def run_detection():
     policies = load_policies_from_dynamodb()
-    os_client = OpenSearch(...)
+    ch_url = os.environ["CLICKHOUSE_HTTP_URL"]  # http://clickhouse.internal:8123
 
     for policy in policies:
         for metric in policy["metrics"]:
-            # Query OpenSearch for 7-day baseline
-            baseline_data = os_client.search(
-                index=f"metrics-{policy['service']}-*",
-                body=build_aggregation_query(metric, window=policy["baseline_window"])
-            )
+            # Query ClickHouse for 7-day baseline
+            baseline_sql = f"""
+                SELECT toStartOfMinute(timestamp) AS ts, avg({metric}) AS value
+                FROM aiops.metrics
+                WHERE service = '{policy['service']}'
+                  AND timestamp >= now() - INTERVAL {policy['baseline_window']}
+                GROUP BY ts ORDER BY ts
+                FORMAT JSONEachRow
+            """
+            baseline_data = [
+                row["value"]
+                for row in httpx.post(ch_url, content=baseline_sql).json()
+            ]
 
             # Run STL decomposition
             trend, seasonal, residual = stl_decompose(baseline_data)
 
             # Score current value against baseline
-            current = get_current_value(os_client, policy["service"], metric)
+            current_sql = f"""
+                SELECT avg({metric}) AS value
+                FROM aiops.metrics
+                WHERE service = '{policy['service']}'
+                  AND timestamp >= now() - INTERVAL 5 MINUTE
+                FORMAT JSONEachRow
+            """
+            current = httpx.post(ch_url, content=current_sql).json()[0]["value"]
             z_score = compute_z_score(current, residual)
 
             # Check for change-points
@@ -432,11 +450,11 @@ class AIProvider(ABC):
     @abstractmethod
     def generate(self, agent_type: str, prompt: str, max_tokens: int, temperature: float) -> str:
         pass
-    
+
     @abstractmethod
     def get_cost_per_token(self) -> float:
         pass
-    
+
     @abstractmethod
     def get_model_info(self) -> dict:
         pass
@@ -484,7 +502,7 @@ class AIProvider(ABC):
 ```python
 def get_provider_for_agent(agent_type: str) -> AIProvider:
     config = policy_store.get("ai_provider_config")[agent_type]
-    
+
     if config["provider"] == "bedrock":
         return BedrockProvider(model=config["model"])
     elif config["provider"] == "self-hosted":
@@ -573,7 +591,7 @@ def get_provider_for_agent(agent_type: str) -> AIProvider:
             "type": "plain_text",
             "text": "View Dashboard"
           },
-          "url": "https://opensearch.example.com/app/dashboards#/view/incident-abc123?time=2026-02-14T09:00:00Z_2026-02-14T10:30:00Z&service=api-gateway",
+          "url": "https://grafana.example.com/d/rca-explorer/rca-evidence-explorer?var-service=api-gateway&var-account_id=123456789012&from=2026-02-14T09:00:00Z&to=2026-02-14T10:30:00Z",
           "style": "primary"
         }
       ]
@@ -583,17 +601,17 @@ def get_provider_for_agent(agent_type: str) -> AIProvider:
 ```
 
 **Deep-Link Generation**:
-- OpenSearch dashboard URL with query parameters:
-  - `time`: Pre-filtered to incident timeframe (±30 minutes)
-  - `service`: Filter to affected service
-  - `account_id`: Filter to affected account
-  - `anomaly_id`: Direct link to anomaly details
+- Grafana dashboard URL with template variable parameters:
+  - `from` / `to`: Pre-filtered to incident timeframe (±30 minutes)
+  - `var-service`: Filter to affected service
+  - `var-account_id`: Filter to affected account
+  - `var-anomaly_id`: Direct link to anomaly details
 
 #### **Screenshot Generation** (Phase 1)
 
 **Approach**:
 - Lambda with headless Chromium (Puppeteer or Playwright)
-- Authenticate to OpenSearch, navigate to dashboard URL
+- Navigate to Grafana dashboard URL (API key auth via header)
 - Take screenshot, upload to S3 signed URL
 - Attach image URL to Slack message
 
@@ -605,18 +623,19 @@ from playwright.sync_api import sync_playwright
 def generate_dashboard_screenshot(dashboard_url: str) -> str:
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page()
-        
-        # Authenticate (IAM session or API key)
+        page = browser.new_page(extra_http_headers={
+            "Authorization": f"Bearer {grafana_api_key}"
+        })
+
         page.goto(dashboard_url)
         page.wait_for_load_state("networkidle")
-        
+
         # Take screenshot
         screenshot_bytes = page.screenshot(full_page=False)
-        
+
         # Upload to S3 with 24h expiry
         s3_url = upload_to_s3_with_expiry(screenshot_bytes, ttl_hours=24)
-        
+
         browser.close()
         return s3_url
 
@@ -630,59 +649,74 @@ def generate_dashboard_screenshot(dashboard_url: str) -> str:
 
 ---
 
-### 7. OpenSearch Dashboards (Pre-Built)
+### 7. Grafana Dashboards (Pre-Built)
+
+Grafana runs as a Fargate service fronted by an ALB. It connects to ClickHouse via the [Grafana ClickHouse datasource plugin](https://grafana.com/grafana/plugins/grafana-clickhouse-datasource/). Dashboards are provisioned as code via Grafana's YAML provisioning mechanism — no manual import needed.
 
 #### **Dashboard 1: Unified Incident Timeline** (MVP)
 
 **Visualizations**:
 - **Timeline**: Horizontal bars showing anomalies, deployments, infra events across accounts
-- **Filters**: Account, region, service, severity, time range
-- **Drill-down**: Click anomaly → navigate to RCA Evidence Explorer
+- **Filters**: Account, region, service, severity, time range (Grafana template variables)
+- **Drill-down**: Click anomaly row → navigate to RCA Evidence Explorer
 
-**Index Pattern**: `anomalies-*`, `events-*`
-
-**Example Query** (pre-filtered via URL):
-```json
-{
-  "query": {
-    "bool": {
-      "must": [
-        {"range": {"timestamp": {"gte": "2026-02-14T09:00:00Z", "lte": "2026-02-14T10:30:00Z"}}},
-        {"term": {"account_id": "123456789012"}},
-        {"term": {"service": "api-gateway"}}
-      ]
-    }
-  },
-  "sort": [{"timestamp": "desc"}]
-}
+**Example Panel Query** (ClickHouse SQL):
+```sql
+SELECT
+    timestamp,
+    anomaly_id,
+    service,
+    account_id,
+    signal,
+    deviation_pct,
+    confidence
+FROM aiops.anomalies
+WHERE service = $__variable(service)
+  AND account_id = $__variable(account_id)
+  AND timestamp BETWEEN $__timeFrom() AND $__timeTo()
+ORDER BY timestamp DESC
 ```
 
 #### **Dashboard 2: Anomaly Detection Results** (MVP)
 
 **Visualizations**:
-- **Line chart**: Current metric vs baseline (e.g., latency over time)
+- **Time series**: Current metric vs baseline (e.g., p95 latency over time)
 - **Heatmap**: Anomaly density by service/account
 - **Table**: Anomaly details (timestamp, metric, deviation, confidence)
 
 **Filters**: Confidence level, deviation %, service
 
+**Example Panel Query** (ClickHouse SQL):
+```sql
+SELECT
+    toStartOfMinute(timestamp) AS ts,
+    avg(p95_latency_ms) AS p95_latency,
+    avg(baseline_p95_latency_ms) AS baseline
+FROM aiops.metrics
+WHERE service = $__variable(service)
+  AND timestamp BETWEEN $__timeFrom() AND $__timeTo()
+GROUP BY ts
+ORDER BY ts
+```
+
 #### **Dashboard 3: RCA Evidence Explorer** (MVP)
 
 **Layout** (linked from Slack alert):
-- **Top Panel**: RCA summary, confidence, probable cause
+- **Top Panel**: RCA summary, confidence, probable cause (from DynamoDB anomalies)
 - **Left Panel**: Related logs (filtered to incident timeframe)
 - **Center Panel**: Metrics visualization (before/during/after incident)
 - **Right Panel**: Events timeline (deployments, autoscaling, alerts)
 
 **Deep-Link Example**:
 ```
-https://opensearch.example.com/app/dashboards#/view/rca-explorer
-  ?anomaly_id=anom-abc123
-  &time=2026-02-14T09:00:00Z_2026-02-14T10:30:00Z
-  &service=api-gateway
+https://grafana.example.com/d/rca-explorer/rca-evidence-explorer
+  ?var-anomaly_id=anom-abc123
+  &var-service=api-gateway
+  &from=2026-02-14T09:00:00Z
+  &to=2026-02-14T10:30:00Z
 ```
 
-OpenSearch automatically applies filters to all panels based on URL parameters.
+Grafana applies the template variable filters to all linked panels automatically.
 
 ---
 
@@ -692,25 +726,29 @@ OpenSearch automatically applies filters to all panels based on URL parameters.
 
 #### **Module: Networking**
 - VPC with private subnets (no public internet access for compute)
-- VPC Endpoints for AWS services (S3, DynamoDB, OpenSearch, Secrets Manager)
+- VPC Endpoints for AWS services (S3, DynamoDB, Secrets Manager)
 - Security groups with least privilege
 
 #### **Module: IAM Roles**
 - `ObservabilityWriteRole` (member accounts) → write to Kinesis Firehose
 - `ObservabilityReadRole` (central account) → read CloudWatch metrics from members
-- `LambdaExecutionRole` → read/write to DynamoDB, S3, OpenSearch, invoke Bedrock
-- `FargateTaskRole` → read from OpenSearch, write to DynamoDB (statistical detection)
+- `LambdaExecutionRole` → read/write to DynamoDB, S3, invoke Bedrock; write to ClickHouse HTTP API
+- `FargateTaskRole` (statistical detector) → query ClickHouse HTTP API, write to DynamoDB
+- `FargateTaskRole` (Grafana) → read Secrets Manager (admin password, datasource credentials)
 
 #### **Module: Data Stores**
 - S3 buckets (raw logs, audit logs) with lifecycle policies
-- OpenSearch Serverless collection with IAM authentication (indexed logs + metrics)
+- ClickHouse on ECS EC2 cluster: t3.large instance, EBS gp3 100GB volume, ECS task with `clickhouse/clickhouse-server` image
 - DynamoDB tables: anomalies, events, policy_store, agent_state, audit_logs
 
 #### **Module: Compute**
 - Lambda functions: normalization, rule-based detection, orchestrator (agentic pipeline), Slack notifier
 - DynamoDB Stream trigger on anomalies table → orchestrator Lambda
-- Fargate task definition + ECS cluster (statistical anomaly detection)
+- ECS EC2 cluster (ClickHouse): t3.large, EBS-backed, ECS agent managed
+- Fargate task definition + ECS cluster (statistical anomaly detection, scheduled)
+- Fargate service + ECS cluster (Grafana, always-on, ALB-fronted)
 - EventBridge Scheduler rule (triggers Fargate detection task every 5 minutes)
+- ALB → Grafana Fargate service (public HTTPS access)
 - (Optional) SageMaker endpoint for self-hosted LLM
 
 #### **Module: Observability**
@@ -725,14 +763,14 @@ OpenSearch automatically applies filters to all panels based on URL parameters.
 # 1. Deploy networking and IAM
 terraform apply -target=module.networking -target=module.iam
 
-# 2. Deploy data stores
+# 2. Deploy data stores (ClickHouse on ECS EC2 + DynamoDB)
 terraform apply -target=module.data_stores
 
-# 3. Deploy compute (Lambda, Fargate)
+# 3. Deploy compute (Lambda, Fargate detection, Grafana + ALB)
 terraform apply -target=module.compute
 
-# 4. Deploy OpenSearch dashboards (import saved objects)
-./scripts/import-opensearch-dashboards.sh
+# 4. Provision Grafana dashboards (via provisioning YAML + API)
+./scripts/provision-grafana-dashboards.sh
 
 # 5. Configure Slack webhook
 aws secretsmanager create-secret \
@@ -770,10 +808,10 @@ terraform apply \
 
 ### **Step 2: Normalization** (T+5 seconds)
 - Lambda parses logs, enriches with deployment metadata
-- Writes to S3 (raw) + OpenSearch (indexed): `{"timestamp": "...", "service": "api-gateway", "p95_latency_ms": 1200, ...}`
+- Writes to S3 (raw) + ClickHouse (indexed): `{"timestamp": "...", "service": "api-gateway", "p95_latency_ms": 1200, ...}`
 
 ### **Step 3: Detection** (next scheduled run, within 5 minutes)
-- Fargate statistical detector queries OpenSearch aggregations: "p95_latency_ms for api-gateway, last 7 days"
+- Fargate statistical detector queries ClickHouse SQL: `SELECT avg(p95_latency_ms) FROM aiops.metrics WHERE service = 'api-gateway' AND timestamp >= now() - INTERVAL 7 DAY`
 - Baseline = 150ms, current = 1200ms, z-score = 5.2 → ANOMALY
 - Writes to DynamoDB anomalies table, triggers orchestrator Lambda via DynamoDB Stream
 
@@ -787,12 +825,12 @@ terraform apply \
 5. **Recommendation Agent**: Maps to runbook: "Rollback deployment or optimize query"
 
 ### **Step 5: Alert** (T+2min)
-- Slack notifier formats payload (RCA summary + OpenSearch link)
+- Slack notifier formats payload (RCA summary + Grafana deep-link)
 - Posts to #aiops-alerts
-- Engineer clicks link, lands on pre-filtered dashboard showing logs, metrics, deployment event
+- Engineer clicks link, lands on pre-filtered Grafana dashboard showing logs, metrics, deployment event
 
 ### **Step 6: Investigation** (T+3min)
-- Engineer reviews OpenSearch dashboard
+- Engineer reviews Grafana dashboard with ClickHouse-backed panels
 - Confirms RCA hypothesis by drilling into slow query logs
 - Executes rollback or query optimization
 
@@ -807,18 +845,18 @@ terraform apply \
 
 | Week | Deliverable |
 |------|-------------|
-| 1-2  | Infrastructure setup (Terraform, IAM, S3, DynamoDB, OpenSearch) |
-| 3-4  | Ingestion pipeline (CloudWatch → Kinesis → Lambda → OpenSearch) |
-| 5    | Statistical anomaly detection (Fargate scheduled task + OpenSearch aggregation queries) |
+| 1-2  | Infrastructure setup (Terraform, IAM, S3, DynamoDB, ClickHouse on ECS EC2) |
+| 3-4  | Ingestion pipeline (CloudWatch → Kinesis → Lambda → ClickHouse) |
+| 5    | Statistical anomaly detection (Fargate scheduled task + ClickHouse SQL queries) |
 | 6    | Orchestrator Lambda + Detection/Correlation agents |
 | 7    | RCA Agent with Bedrock Claude integration |
-| 8    | Slack notifier + 3 OpenSearch dashboards |
+| 8    | Slack notifier + 3 Grafana dashboards (ClickHouse datasource) |
 
 **Success Criteria**:
 - ✅ Ingest logs from 5 test accounts
 - ✅ Detect 1 synthetic anomaly (injected latency spike)
 - ✅ Generate RCA with confidence score
-- ✅ Deliver Slack alert with OpenSearch link
+- ✅ Deliver Slack alert with Grafana deep-link
 
 ### **Phase 1** (Weeks 9-12)
 **Goal**: Production-ready with enhanced observability.
@@ -835,7 +873,7 @@ terraform apply \
 
 | Week | Deliverable |
 |------|-------------|
-| 13-14 | Slack bot Q&A (natural language queries) |
+| 13-14 | Slack bot Q&A (natural language queries over ClickHouse SQL) |
 | 15    | Interactive Slack actions (acknowledge, snooze) |
 | 16-17 | Runbook integration and execution triggers |
 | 18    | Smart alert routing (per-account channels) |
@@ -848,23 +886,25 @@ terraform apply \
 
 ### **Monitoring & Alerting**
 - **Pipeline health**: CloudWatch alarms on Lambda errors, Fargate task failures, orchestrator Lambda failures
-- **Data lag**: Alert if OpenSearch indexing lag > 5 minutes
-- **Cost**: Daily budget alerts on AI provider spend, S3/OpenSearch usage
+- **Data lag**: Alert if ClickHouse write lag > 5 minutes (monitor via CloudWatch custom metric from normalizer Lambda)
+- **Cost**: Daily budget alerts on AI provider spend, S3/EBS/EC2 usage
 - **RCA accuracy**: Track confidence vs engineer validation (Phase 2 feedback loop)
 
 ### **Disaster Recovery**
 - **Data loss**: S3 cross-region replication for raw logs (optional for Phase 2)
 - **Control plane**: Terraform state in S3 with versioning, infrastructure reproducible in <1 hour
-- **OpenSearch**: Automated snapshots to S3 every 24 hours
+- **ClickHouse**: ECS task auto-restart on failure (data persists on EBS); daily EBS snapshots to S3
 
 ### **Security**
 - **Encryption**: S3/DynamoDB encryption at rest (KMS), TLS in transit
 - **Access control**: IAM roles only, no long-lived credentials
 - **Audit trail**: All AI prompts/responses logged to S3 for compliance
+- **Grafana**: API key authentication for dashboard access and screenshot generation
 
 ### **Cost Optimization**
-- **Compute**: Lambda scales to zero (pay-per-invocation), Fargate pay-per-second (~$1-3/month for detection)
-- **Storage**: S3 Intelligent-Tiering for raw logs, OpenSearch Serverless pay-per-use
+- **Compute**: Lambda scales to zero (pay-per-invocation), Fargate pay-per-second (~$1-3/month for detection task)
+- **Storage**: S3 Intelligent-Tiering for raw logs, EBS gp3 for ClickHouse (~$10/month per 100GB)
+- **EC2**: t3.large 1-year reserved (~$42/month) for ClickHouse reduces on-demand cost by ~38%
 - **AI providers**: Per-agent cost caps, option to use self-hosted LLMs for high-volume tasks
 
 ---
@@ -874,12 +914,12 @@ terraform apply \
 | Layer              | Technology                          | Rationale                                       |
 |--------------------|-------------------------------------|-------------------------------------------------|
 | **Ingestion**      | Kinesis Firehose                    | Managed, scalable, cross-account support        |
-| **Storage**        | S3, OpenSearch Serverless, DynamoDB | Logs + metrics in OpenSearch, events/state in DynamoDB |
-| **Compute**        | Lambda, Fargate                     | Serverless, cost-effective, right tool per workload |
+| **Storage**        | S3, ClickHouse (ECS EC2), DynamoDB  | Logs + metrics in ClickHouse (SQL, columnar), events/state in DynamoDB |
+| **Compute**        | Lambda, Fargate, ECS EC2            | Lambda for event-driven; Fargate for stateless scheduled; EC2 for stateful ClickHouse |
 | **Detection**      | Fargate (statistical), Lambda (rules) | Fargate for heavy ML libs, Lambda for lightweight thresholds |
 | **Orchestration**  | Orchestrator Lambda + DynamoDB Stream | Simple linear pipeline, no extra service overhead |
 | **AI Provider**    | AWS Bedrock (MVP), pluggable        | Multi-model support, easy to extend             |
-| **Dashboards**     | OpenSearch Dashboards               | Built-in, powerful, no custom UI needed         |
+| **Dashboards**     | Grafana (Fargate) + ClickHouse datasource | Purpose-built visualization; SQL queries align with Phase 2 NL chat agent |
 | **Notifications**  | Slack API (Lambda)                  | Simple webhook, rich formatting                 |
 | **IaC**            | Terraform                           | Reproducible, version-controlled                |
 | **Region**         | eu-central-1 (single region MVP)    | Customer preference, expand in Phase 2          |
@@ -899,4 +939,3 @@ terraform apply \
 - **Cost attribution**: Per-service/team AI provider billing
 - **Advanced ML**: Reinforcement learning for detection policy tuning
 - **External integrations**: Jira/ServiceNow ticketing, PagerDuty escalation policies
-
