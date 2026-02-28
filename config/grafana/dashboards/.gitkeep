@@ -1,0 +1,8 @@
+# Dashboard JSON files go here.
+# scripts/provision-grafana.sh will load every *.json file in this directory
+# into Grafana via the /api/dashboards/import endpoint.
+#
+# To add a dashboard:
+#   1. Build/export it in the Grafana UI (Dashboard → Share → Export → Save to file)
+#   2. Drop the JSON file here
+#   3. Run: scripts/provision-grafana.sh

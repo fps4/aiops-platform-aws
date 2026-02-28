@@ -1,0 +1,8 @@
+# Grafana dashboard filesystem provider — managed by scripts/provision-grafana.sh
+# Grafana watches /var/lib/grafana/dashboards for JSON files and auto-loads them.
+apiVersion: 1
+providers:
+  - name: aiops
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
