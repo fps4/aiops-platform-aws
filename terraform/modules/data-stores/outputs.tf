@@ -48,9 +48,14 @@ output "agent_state_table_name" {
   value       = aws_dynamodb_table.agent_state.name
 }
 
+output "clickhouse_instance_id" {
+  description = "ClickHouse EC2 instance ID (for SSM port forwarding)"
+  value       = length(aws_instance.clickhouse) > 0 ? aws_instance.clickhouse[0].id : ""
+}
+
 output "clickhouse_host" {
-  description = "ClickHouse service-discovery hostname (resolvable within VPC via Cloud Map)"
-  value       = length(aws_service_discovery_private_dns_namespace.aiops) > 0 ? "clickhouse.${aws_service_discovery_private_dns_namespace.aiops[0].name}" : ""
+  description = "ClickHouse EC2 private IP address"
+  value       = length(aws_instance.clickhouse) > 0 ? aws_instance.clickhouse[0].private_ip : ""
 }
 
 output "clickhouse_port" {

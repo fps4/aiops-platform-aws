@@ -175,3 +175,38 @@ While Option B is ~$20–50/month cheaper, ClickHouse was chosen for the followi
 | EC2 instance is a single point of failure | ECS task auto-restart; ClickHouse data on EBS survives restarts; 1-yr reserved instance reduces cost of HA addition later |
 | ClickHouse schema migrations | Version-controlled schema in Terraform; migration scripts in `scripts/` |
 | Log-normalizer must stay storage-agnostic | Push endpoint configured via SSM Parameter Store, not hardcoded |
+
+---
+
+## Addendum (2026-02-28): Replaced ECS/Fargate with plain Linux EC2
+
+### Original deployment (superseded)
+
+- **ClickHouse**: containerised inside an ECS EC2 cluster (ECS service, Cloud Map DNS, capacity provider, ASG, launch template)
+- **Grafana**: Fargate task behind an internal Application Load Balancer (port 3000)
+
+### Revised deployment
+
+- **ClickHouse**: plain Amazon Linux 2023 EC2 instance (t3.large), systemd-managed `clickhouse-server`, separate 100 GB gp3 EBS at `/var/lib/clickhouse`
+- **Grafana**: plain Amazon Linux 2023 EC2 instance (t3.small), systemd-managed `grafana-server` with `grafana-clickhouse-datasource` plugin installed via `grafana-cli`
+- **Access**: SSM Session Manager port forwarding (no public IPs, no ALB, no SSH keys)
+
+### Rationale
+
+1. **ECS adds no value for ClickHouse**: ClickHouse is stateful and disk-bound. Containerising it requires host-networking, a manual EBS mount in user_data, and ECS service plumbing (capacity provider, ASG, Cloud Map) — all overhead with zero benefit over a plain EC2 instance that runs the same binary under systemd.
+
+2. **Fargate + ALB for Grafana is over-engineered**: Grafana is a long-running, stateful dashboard server. Running it on Fargate costs ~$9/month for the task plus ~$19/month for an internal ALB that serves a single container. A t3.small EC2 at ~$17/month replaces both.
+
+3. **Simpler operations**: Two plain EC2 instances managed by systemd are easier to reason about, debug (SSM shell access), and replace than ECS task definitions, capacity providers, and load balancers.
+
+### Cost impact (eu-central-1, on-demand)
+
+| Component | Before | After | Delta |
+|---|---|---|---|
+| Grafana Fargate (0.5 vCPU/1 GB) | $9/mo | $0 | -$9 |
+| Grafana EC2 (t3.small) | $0 | $17/mo | +$17 |
+| Internal ALB | $19/mo | $0 | **-$19** |
+| ClickHouse ECS overhead | ~$0 (EC2 launch type) | $0 | $0 |
+| **Net** | | | **-$11/mo** |
+
+Small saving; primary benefit is architectural simplicity.

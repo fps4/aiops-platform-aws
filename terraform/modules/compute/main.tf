@@ -326,7 +326,7 @@ resource "aws_lambda_function" "orchestrator" {
       DYNAMODB_EVENTS_TABLE      = var.events_table_name
       CLICKHOUSE_HOST            = var.clickhouse_host
       CLICKHOUSE_PORT            = tostring(var.clickhouse_port)
-      GRAFANA_URL                = var.grafana_url
+      GRAFANA_URL                = length(aws_instance.grafana) > 0 ? "http://${aws_instance.grafana[0].private_ip}:3000" : ""
       SLACK_WEBHOOK_SECRET_ARN   = var.slack_webhook_secret_arn
       ENVIRONMENT                = var.environment
     }
@@ -355,30 +355,78 @@ resource "aws_lambda_event_source_mapping" "anomalies_stream" {
   }
 }
 
-# ─── Grafana (Fargate + internal ALB) ─────────────────────────────────────────
+# ─── Grafana (plain Linux EC2, AL2023, systemd) ───────────────────────────────
 
-resource "aws_cloudwatch_log_group" "grafana" {
-  name              = "/ecs/${local.name_prefix}-grafana"
-  retention_in_days = 14
+# Derive VPC for Grafana security group
+data "aws_subnet" "grafana_ec2" {
+  count = var.ec2_subnet_id != "" ? 1 : 0
+  id    = var.ec2_subnet_id
+}
 
-  tags = {
-    Environment = var.environment
-    ManagedBy   = "terraform"
+data "aws_vpc" "grafana" {
+  count = var.ec2_subnet_id != "" ? 1 : 0
+  id    = data.aws_subnet.grafana_ec2[0].vpc_id
+}
+
+# Amazon Linux 2023 AMI (same pattern as ClickHouse)
+data "aws_ami" "al2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
   }
 }
 
-# Security group for the Grafana ALB
-resource "aws_security_group" "grafana_alb" {
-  count       = length(var.fargate_subnet_ids) > 0 ? 1 : 0
-  name        = "${local.name_prefix}-grafana-alb"
-  description = "Allow inbound HTTP to Grafana ALB"
-  vpc_id      = data.aws_subnet.fargate_primary[0].vpc_id
+# IAM role for Grafana EC2 (SSM access — no SSH keys needed)
+resource "aws_iam_role" "grafana_ec2" {
+  count = var.ec2_subnet_id != "" ? 1 : 0
+  name  = "${local.name_prefix}-grafana-ec2"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  tags = { Environment = var.environment, ManagedBy = "terraform" }
+}
+
+resource "aws_iam_role_policy_attachment" "grafana_ec2_ssm" {
+  count      = var.ec2_subnet_id != "" ? 1 : 0
+  role       = aws_iam_role.grafana_ec2[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy_attachment" "grafana_ec2_cloudwatch" {
+  count      = var.ec2_subnet_id != "" ? 1 : 0
+  role       = aws_iam_role.grafana_ec2[0].name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_iam_instance_profile" "grafana_ec2" {
+  count = var.ec2_subnet_id != "" ? 1 : 0
+  name  = "${local.name_prefix}-grafana-ec2"
+  role  = aws_iam_role.grafana_ec2[0].name
+}
+
+# Security group: port 3000 from VPC CIDR only
+resource "aws_security_group" "grafana" {
+  count       = var.ec2_subnet_id != "" ? 1 : 0
+  name        = "${local.name_prefix}-grafana"
+  description = "Allow Grafana access from within VPC"
+  vpc_id      = data.aws_subnet.grafana_ec2[0].vpc_id
 
   ingress {
+    description = "Grafana HTTP"
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [data.aws_vpc.grafana[0].cidr_block]
   }
 
   egress {
@@ -394,117 +442,49 @@ resource "aws_security_group" "grafana_alb" {
   }
 }
 
-resource "aws_lb" "grafana" {
-  count              = length(var.fargate_subnet_ids) > 0 ? 1 : 0
-  name               = "${local.name_prefix}-grafana"
-  internal           = true
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.grafana_alb[0].id]
-  subnets            = var.fargate_subnet_ids
+# Plain EC2 instance for Grafana (t3.small — ~500 MB RAM needed)
+resource "aws_instance" "grafana" {
+  count                  = var.ec2_subnet_id != "" ? 1 : 0
+  ami                    = data.aws_ami.al2023.id
+  instance_type          = "t3.small"
+  subnet_id              = var.ec2_subnet_id
+  vpc_security_group_ids = [aws_security_group.grafana[0].id]
+  iam_instance_profile   = aws_iam_instance_profile.grafana_ec2[0].name
 
-  tags = {
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
-}
-
-resource "aws_lb_target_group" "grafana" {
-  count       = length(var.fargate_subnet_ids) > 0 ? 1 : 0
-  name        = "${local.name_prefix}-grafana"
-  port        = 3000
-  protocol    = "HTTP"
-  vpc_id      = data.aws_subnet.fargate_primary[0].vpc_id
-  target_type = "ip"
-
-  health_check {
-    path                = "/api/health"
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-    interval            = 30
+  root_block_device {
+    volume_size = 20
+    volume_type = "gp3"
   }
 
-  tags = {
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
-}
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    set -e
 
-resource "aws_lb_listener" "grafana" {
-  count             = length(var.fargate_subnet_ids) > 0 ? 1 : 0
-  load_balancer_arn = aws_lb.grafana[0].arn
-  port              = 3000
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.grafana[0].arn
-  }
-}
-
-resource "aws_ecs_task_definition" "grafana" {
-  family                   = "${local.name_prefix}-grafana"
-  requires_compatibilities = ["FARGATE"]
-  network_mode             = "awsvpc"
-  cpu                      = 512
-  memory                   = 1024
-  task_role_arn            = var.fargate_task_role_arn
-  execution_role_arn       = var.ecs_task_execution_role_arn
-
-  container_definitions = jsonencode([
+    # Add Grafana RPM repository
     {
-      name      = "grafana"
-      image     = "grafana/grafana:latest"
-      essential = true
+      echo '[grafana]'
+      echo 'name=grafana'
+      echo 'baseurl=https://rpm.grafana.com'
+      echo 'repo_gpgcheck=1'
+      echo 'enabled=1'
+      echo 'gpgcheck=1'
+      echo 'gpgkey=https://rpm.grafana.com/gpg.key'
+      echo 'sslverify=1'
+      echo 'sslcacert=/etc/pki/tls/certs/ca-bundle.crt'
+    } > /etc/yum.repos.d/grafana.repo
 
-      portMappings = [{ containerPort = 3000, protocol = "tcp" }]
+    dnf install -y grafana
 
-      environment = [
-        { name = "GF_INSTALL_PLUGINS",      value = "grafana-clickhouse-datasource" },
-        { name = "GF_AUTH_ANONYMOUS_ENABLED", value = "false" },
-        { name = "CLICKHOUSE_HOST",           value = var.clickhouse_host },
-        { name = "CLICKHOUSE_PORT",           value = tostring(var.clickhouse_port) },
-      ]
+    # Install ClickHouse datasource plugin
+    grafana-cli plugins install grafana-clickhouse-datasource
 
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.grafana.name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
-      }
-    }
-  ])
+    # Enable and start Grafana
+    systemctl enable --now grafana-server
+  EOF
+  )
 
   tags = {
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
-}
-
-resource "aws_ecs_service" "grafana" {
-  count           = length(var.fargate_subnet_ids) > 0 ? 1 : 0
-  name            = "${local.name_prefix}-grafana"
-  cluster         = aws_ecs_cluster.detection.id
-  task_definition = aws_ecs_task_definition.grafana.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    assign_public_ip = true
-    subnets          = var.fargate_subnet_ids
-    security_groups  = length(var.fargate_security_group_ids) > 0 ? var.fargate_security_group_ids : [aws_security_group.fargate_egress_all[0].id]
-  }
-
-  load_balancer {
-    target_group_arn = aws_lb_target_group.grafana[0].arn
-    container_name   = "grafana"
-    container_port   = 3000
-  }
-
-  depends_on = [aws_lb_listener.grafana]
-
-  tags = {
+    Name        = "${local.name_prefix}-grafana"
     Environment = var.environment
     ManagedBy   = "terraform"
   }

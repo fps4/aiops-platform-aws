@@ -28,7 +28,7 @@ module "data_stores" {
   central_account_id = var.central_account_id
   retention_days     = var.retention_days
   aws_region         = var.aws_region
-  subnet_ids         = length(var.fargate_subnet_ids) > 0 ? var.fargate_subnet_ids : data.aws_subnets.default_public.ids
+  subnet_id          = length(var.fargate_subnet_ids) > 0 ? var.fargate_subnet_ids[0] : tolist(data.aws_subnets.default_public.ids)[0]
 }
 
 # Ingestion Module
@@ -57,7 +57,7 @@ module "compute" {
   ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
   clickhouse_host             = module.data_stores.clickhouse_host
   clickhouse_port             = tonumber(module.data_stores.clickhouse_port)
-  grafana_url                 = module.compute.grafana_url
+  ec2_subnet_id               = length(var.fargate_subnet_ids) > 0 ? var.fargate_subnet_ids[0] : tolist(data.aws_subnets.default_public.ids)[0]
   anomalies_table_name        = module.data_stores.anomalies_table_name
   anomalies_table_stream_arn  = module.data_stores.anomalies_table_stream_arn
   agent_state_table_name      = module.data_stores.agent_state_table_name

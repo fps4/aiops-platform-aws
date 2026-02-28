@@ -47,7 +47,7 @@ scripts/load-policies.sh --file policies/default-policies.yaml
 ### Data Flow
 ```
 Member AWS Accounts → CloudWatch Logs → Subscription Filter → Kinesis Firehose
-  → Lambda (log-normalizer) → S3 (raw) + ClickHouse (ECS EC2, aiops.logs table)
+  → Lambda (log-normalizer) → S3 (raw) + ClickHouse (EC2, aiops.logs table)
   CloudTrail → CloudWatch Logs → same Kinesis Firehose pipeline
 ```
 
@@ -63,8 +63,18 @@ ClickHouse metrics → Fargate scheduled task (every 5 min):
 ```
 
 ### Observability Stack
-- **Storage**: ClickHouse (ECS EC2, t3.large, EBS gp3 100 GB) — tables `aiops.logs`, `aiops.anomalies`
-- **Dashboards**: Grafana (Fargate, internal ALB port 3000) with `grafana-clickhouse-datasource` plugin
+- **Storage**: ClickHouse (plain Linux EC2, t3.large, AL2023, systemd) — tables `aiops.logs`, `aiops.anomalies`; separate 100 GB gp3 EBS at `/var/lib/clickhouse`
+- **Dashboards**: Grafana (plain Linux EC2, t3.small, AL2023, systemd) with `grafana-clickhouse-datasource` plugin
+- **Access**: No public IPs or ALB. Use SSM Session Manager port forwarding for dev:
+  ```bash
+  # Grafana (port 3000)
+  aws ssm start-session --target $(terraform -chdir=terraform/environments/dev output -raw grafana_instance_id) \
+    --document-name AWS-StartPortForwardingSession \
+    --parameters '{"portNumber":["3000"],"localPortNumber":["3000"]}'
+  # then open http://localhost:3000
+
+  # ClickHouse (port 8123) — same pattern, use clickhouse_instance_id output
+  ```
 - **Client**: `src/shared/clickhouse_client.py` using `clickhouse-connect` (HTTP port 8123)
 - **Schema**: `scripts/init-clickhouse-schema.sql` — run once after ClickHouse starts
 - **Env vars**: `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT` (8123), `GRAFANA_URL`

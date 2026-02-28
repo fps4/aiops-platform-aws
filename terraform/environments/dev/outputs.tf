@@ -13,11 +13,6 @@ output "raw_logs_bucket_name" {
   value       = module.data_stores.raw_logs_bucket_name
 }
 
-output "opensearch_endpoint" {
-  description = "OpenSearch domain endpoint"
-  value       = module.data_stores.opensearch_domain_endpoint
-}
-
 output "anomalies_table_name" {
   description = "Name of anomalies DynamoDB table"
   value       = module.data_stores.anomalies_table_name
@@ -68,7 +63,17 @@ output "ecr_repository_url" {
   value       = module.compute.ecr_repository_url
 }
 
-output "opensearch_application_endpoint" {
-  description = "OpenSearch Application endpoint (Dashboards UI)"
-  value       = module.data_stores.opensearch_application_endpoint
+output "clickhouse_instance_id" {
+  description = "ClickHouse EC2 instance ID (use with SSM port forwarding)"
+  value       = module.data_stores.clickhouse_instance_id
+}
+
+output "grafana_instance_id" {
+  description = "Grafana EC2 instance ID (use with SSM port forwarding)"
+  value       = module.compute.grafana_instance_id
+}
+
+output "grafana_url" {
+  description = "Grafana URL (accessible via SSM port forwarding)"
+  value       = module.compute.grafana_url
 }

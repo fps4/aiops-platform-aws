@@ -3,6 +3,7 @@
 data "aws_caller_identity" "current" {}
 
 locals {
+  name_prefix   = "${var.project_prefix}-${var.environment}"
   bucket_prefix = "${data.aws_caller_identity.current.account_id}-${var.project_prefix}-${var.environment}"
 }
 
@@ -320,27 +321,32 @@ resource "aws_dynamodb_table" "audit_logs" {
   }
 }
 
-# ─── ClickHouse (ECS EC2) ─────────────────────────────────────────────────────
+# ─── ClickHouse (plain Linux EC2) ─────────────────────────────────────────────
 
-# Derive VPC from first subnet when subnets are supplied
-data "aws_subnet" "clickhouse_primary" {
-  count = length(var.subnet_ids) > 0 ? 1 : 0
-  id    = var.subnet_ids[0]
+# Derive VPC from the subnet
+data "aws_subnet" "clickhouse" {
+  count = var.subnet_id != "" ? 1 : 0
+  id    = var.subnet_id
+}
+
+data "aws_vpc" "clickhouse" {
+  count = var.subnet_id != "" ? 1 : 0
+  id    = data.aws_subnet.clickhouse[0].vpc_id
 }
 
 # Security group: allow ClickHouse HTTP (8123) from within the VPC
 resource "aws_security_group" "clickhouse" {
-  count       = length(var.subnet_ids) > 0 ? 1 : 0
-  name        = "${local.bucket_prefix}-clickhouse"
+  count       = var.subnet_id != "" ? 1 : 0
+  name        = "${local.name_prefix}-clickhouse"
   description = "Allow ClickHouse HTTP access from within VPC"
-  vpc_id      = data.aws_subnet.clickhouse_primary[0].vpc_id
+  vpc_id      = data.aws_subnet.clickhouse[0].vpc_id
 
   ingress {
     description = "ClickHouse HTTP interface"
     from_port   = 8123
     to_port     = 8123
     protocol    = "tcp"
-    cidr_blocks = [data.aws_subnet.clickhouse_primary[0].cidr_block]
+    cidr_blocks = [data.aws_vpc.clickhouse[0].cidr_block]
   }
 
   egress {
@@ -351,16 +357,16 @@ resource "aws_security_group" "clickhouse" {
   }
 
   tags = {
-    Name        = "${local.bucket_prefix}-clickhouse"
+    Name        = "${local.name_prefix}-clickhouse"
     Environment = var.environment
     ManagedBy   = "terraform"
   }
 }
 
-# IAM role and instance profile for ECS EC2 nodes
+# IAM role for ClickHouse EC2 (SSM + CloudWatch, no ECS needed)
 resource "aws_iam_role" "clickhouse_ec2" {
-  count = length(var.subnet_ids) > 0 ? 1 : 0
-  name  = "${local.bucket_prefix}-clickhouse-ec2"
+  count = var.subnet_id != "" ? 1 : 0
+  name  = "${local.name_prefix}-clickhouse-ec2"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -374,245 +380,147 @@ resource "aws_iam_role" "clickhouse_ec2" {
   tags = { Environment = var.environment, ManagedBy = "terraform" }
 }
 
-resource "aws_iam_role_policy_attachment" "clickhouse_ec2_ecs" {
-  count      = length(var.subnet_ids) > 0 ? 1 : 0
+resource "aws_iam_role_policy_attachment" "clickhouse_ec2_ssm" {
+  count      = var.subnet_id != "" ? 1 : 0
   role       = aws_iam_role.clickhouse_ec2[0].name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy_attachment" "clickhouse_ec2_cloudwatch" {
+  count      = var.subnet_id != "" ? 1 : 0
+  role       = aws_iam_role.clickhouse_ec2[0].name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
 resource "aws_iam_instance_profile" "clickhouse_ec2" {
-  count = length(var.subnet_ids) > 0 ? 1 : 0
-  name  = "${local.bucket_prefix}-clickhouse-ec2"
+  count = var.subnet_id != "" ? 1 : 0
+  name  = "${local.name_prefix}-clickhouse-ec2"
   role  = aws_iam_role.clickhouse_ec2[0].name
 }
 
-# ECS-optimised Amazon Linux 2 AMI
-data "aws_ami" "ecs_optimized" {
+# Amazon Linux 2023 AMI
+data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-ecs-hvm-*-x86_64-ebs"]
+    values = ["al2023-ami-2023.*-x86_64"]
   }
 }
 
-# EC2 Launch Template for ClickHouse
-resource "aws_launch_template" "clickhouse" {
-  count         = length(var.subnet_ids) > 0 ? 1 : 0
-  name_prefix   = "${local.bucket_prefix}-clickhouse-"
-  image_id      = data.aws_ami.ecs_optimized.id
-  instance_type = "t3.large"
+# Separate EBS volume for ClickHouse data (100 GB gp3, persists across instance replacements)
+resource "aws_ebs_volume" "clickhouse_data" {
+  count             = var.subnet_id != "" ? 1 : 0
+  availability_zone = data.aws_subnet.clickhouse[0].availability_zone
+  size              = 100
+  type              = "gp3"
 
-  iam_instance_profile {
-    arn = aws_iam_instance_profile.clickhouse_ec2[0].arn
+  tags = {
+    Name        = "${local.name_prefix}-clickhouse-data"
+    Environment = var.environment
+    ManagedBy   = "terraform"
   }
+}
 
+# Plain EC2 instance for ClickHouse (t3.large, AL2023, systemd)
+resource "aws_instance" "clickhouse" {
+  count                  = var.subnet_id != "" ? 1 : 0
+  ami                    = data.aws_ami.al2023.id
+  instance_type          = "t3.large"
+  subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.clickhouse[0].id]
+  iam_instance_profile   = aws_iam_instance_profile.clickhouse_ec2[0].name
 
-  # EBS root volume
-  block_device_mappings {
-    device_name = "/dev/xvda"
-    ebs {
-      volume_size = 30
-      volume_type = "gp3"
-    }
+  root_block_device {
+    volume_size = 30
+    volume_type = "gp3"
   }
 
-  # Extra EBS volume for ClickHouse data
-  block_device_mappings {
-    device_name = "/dev/xvdb"
-    ebs {
-      volume_size = 100
-      volume_type = "gp3"
-    }
-  }
-
+  # user_data installs ClickHouse and waits for the data volume to be attached
+  # by Terraform (aws_volume_attachment). The wait loop handles the timing gap
+  # between instance launch and volume attachment (~1-2 min in practice).
   user_data = base64encode(<<-EOF
     #!/bin/bash
-    echo ECS_CLUSTER=${local.bucket_prefix}-clickhouse >> /etc/ecs/ecs.config
-    mkfs -t xfs /dev/xvdb
-    mkdir -p /var/lib/clickhouse
-    mount /dev/xvdb /var/lib/clickhouse
-    echo '/dev/xvdb /var/lib/clickhouse xfs defaults,nofail 0 2' >> /etc/fstab
+    set -e
+
+    # Add ClickHouse RPM repository
+    {
+      echo '[clickhouse-stable]'
+      echo 'name=ClickHouse - Stable Repository'
+      echo 'baseurl=https://packages.clickhouse.com/rpm/stable/'
+      echo 'gpgcheck=1'
+      echo 'gpgkey=https://packages.clickhouse.com/rpm/stable/repodata/repomd.xml.key'
+      echo 'enabled=1'
+    } > /etc/yum.repos.d/clickhouse.repo
+
+    dnf install -y clickhouse-server clickhouse-client
+
+    # Configure ClickHouse to listen on all interfaces
+    mkdir -p /etc/clickhouse-server/config.d
+    {
+      echo '<clickhouse>'
+      echo '    <listen_host>0.0.0.0</listen_host>'
+      echo '</clickhouse>'
+    } > /etc/clickhouse-server/config.d/listen.xml
+
+    # Wait for the data volume to be attached by Terraform (up to 5 minutes).
+    # On Nitro instances (t3.*), /dev/xvdb is surfaced as /dev/nvme1n1 by the kernel.
+    DATA_DEV=""
+    i=0
+    while [ $i -lt 60 ]; do
+      if [ -b /dev/nvme1n1 ]; then
+        DATA_DEV=/dev/nvme1n1
+        break
+      fi
+      if [ -b /dev/xvdb ]; then
+        DATA_DEV=/dev/xvdb
+        break
+      fi
+      i=$((i + 1))
+      sleep 5
+    done
+
+    if [ -n "$DATA_DEV" ]; then
+      # Format only if not already formatted (idempotent on reboot)
+      if ! blkid "$DATA_DEV" > /dev/null 2>&1; then
+        mkfs -t xfs "$DATA_DEV"
+      fi
+      mkdir -p /var/lib/clickhouse
+      mount "$DATA_DEV" /var/lib/clickhouse
+      echo "$DATA_DEV /var/lib/clickhouse xfs defaults,nofail 0 2" >> /etc/fstab
+      chown -R clickhouse:clickhouse /var/lib/clickhouse
+    fi
+
+    # Enable and start ClickHouse
+    systemctl enable --now clickhouse-server
+
+    # Wait for ClickHouse to be ready (up to 60 seconds)
+    i=0
+    while [ $i -lt 30 ]; do
+      if clickhouse-client -q "SELECT 1" > /dev/null 2>&1; then
+        break
+      fi
+      i=$((i + 1))
+      sleep 2
+    done
+
+    # Create aiops database
+    clickhouse-client -q "CREATE DATABASE IF NOT EXISTS aiops"
   EOF
   )
 
-  tag_specifications {
-    resource_type = "instance"
-    tags = {
-      Name        = "${local.bucket_prefix}-clickhouse"
-      Environment = var.environment
-      ManagedBy   = "terraform"
-    }
+  tags = {
+    Name        = "${local.name_prefix}-clickhouse"
+    Environment = var.environment
+    ManagedBy   = "terraform"
   }
 }
 
-# Auto Scaling Group (single instance for dev)
-resource "aws_autoscaling_group" "clickhouse" {
-  count               = length(var.subnet_ids) > 0 ? 1 : 0
-  name                = "${local.bucket_prefix}-clickhouse"
-  desired_capacity    = 1
-  min_size            = 1
-  max_size            = 1
-  vpc_zone_identifier = var.subnet_ids
-
-  launch_template {
-    id      = aws_launch_template.clickhouse[0].id
-    version = "$Latest"
-  }
-
-  tag {
-    key                 = "AmazonECSManaged"
-    value               = ""
-    propagate_at_launch = true
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# ECS Cluster for ClickHouse
-resource "aws_ecs_cluster" "clickhouse" {
-  count = length(var.subnet_ids) > 0 ? 1 : 0
-  name  = "${local.bucket_prefix}-clickhouse"
-
-  setting {
-    name  = "containerInsights"
-    value = "enabled"
-  }
-
-  tags = { Environment = var.environment, ManagedBy = "terraform" }
-}
-
-# ECS Capacity Provider backed by the ASG
-resource "aws_ecs_capacity_provider" "clickhouse_ec2" {
-  count = length(var.subnet_ids) > 0 ? 1 : 0
-  name  = "${local.bucket_prefix}-clickhouse-ec2"
-
-  auto_scaling_group_provider {
-    auto_scaling_group_arn = aws_autoscaling_group.clickhouse[0].arn
-
-    managed_scaling {
-      status          = "ENABLED"
-      target_capacity = 100
-    }
-  }
-}
-
-resource "aws_ecs_cluster_capacity_providers" "clickhouse" {
-  count              = length(var.subnet_ids) > 0 ? 1 : 0
-  cluster_name       = aws_ecs_cluster.clickhouse[0].name
-  capacity_providers = [aws_ecs_capacity_provider.clickhouse_ec2[0].name]
-
-  default_capacity_provider_strategy {
-    capacity_provider = aws_ecs_capacity_provider.clickhouse_ec2[0].name
-    weight            = 1
-  }
-}
-
-# Cloud Map for stable service-discovery DNS
-resource "aws_service_discovery_private_dns_namespace" "aiops" {
-  count = length(var.subnet_ids) > 0 ? 1 : 0
-  name  = "${var.project_prefix}-${var.environment}.local"
-  vpc   = data.aws_subnet.clickhouse_primary[0].vpc_id
-
-  tags = { Environment = var.environment, ManagedBy = "terraform" }
-}
-
-resource "aws_service_discovery_service" "clickhouse" {
-  count = length(var.subnet_ids) > 0 ? 1 : 0
-  name  = "clickhouse"
-
-  dns_config {
-    namespace_id = aws_service_discovery_private_dns_namespace.aiops[0].id
-
-    dns_records {
-      ttl  = 10
-      type = "A"
-    }
-
-    routing_policy = "MULTIVALUE"
-  }
-
-  health_check_custom_config {
-    failure_threshold = 1
-  }
-}
-
-# CloudWatch log group for ClickHouse ECS task
-resource "aws_cloudwatch_log_group" "clickhouse" {
-  count             = length(var.subnet_ids) > 0 ? 1 : 0
-  name              = "/ecs/${local.bucket_prefix}-clickhouse"
-  retention_in_days = 14
-
-  tags = { Environment = var.environment, ManagedBy = "terraform" }
-}
-
-# ECS Task Definition for ClickHouse (host networking for direct port access)
-resource "aws_ecs_task_definition" "clickhouse" {
-  count                 = length(var.subnet_ids) > 0 ? 1 : 0
-  family                = "${local.bucket_prefix}-clickhouse"
-  requires_compatibilities = ["EC2"]
-  network_mode          = "host"
-
-  container_definitions = jsonencode([
-    {
-      name      = "clickhouse"
-      image     = "clickhouse/clickhouse-server:latest"
-      essential = true
-
-      portMappings = [
-        { containerPort = 8123, hostPort = 8123, protocol = "tcp" },
-        { containerPort = 9000, hostPort = 9000, protocol = "tcp" }
-      ]
-
-      mountPoints = [
-        { sourceVolume = "clickhouse-data", containerPath = "/var/lib/clickhouse" }
-      ]
-
-      environment = [
-        { name = "CLICKHOUSE_DB", value = "aiops" }
-      ]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.clickhouse[0].name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
-      }
-    }
-  ])
-
-  volume {
-    name      = "clickhouse-data"
-    host_path = "/var/lib/clickhouse"
-  }
-
-  tags = { Environment = var.environment, ManagedBy = "terraform" }
-}
-
-# ECS Service for ClickHouse with Cloud Map service discovery
-resource "aws_ecs_service" "clickhouse" {
-  count           = length(var.subnet_ids) > 0 ? 1 : 0
-  name            = "${local.bucket_prefix}-clickhouse"
-  cluster         = aws_ecs_cluster.clickhouse[0].id
-  task_definition = aws_ecs_task_definition.clickhouse[0].arn
-  desired_count   = 1
-
-  capacity_provider_strategy {
-    capacity_provider = aws_ecs_capacity_provider.clickhouse_ec2[0].name
-    weight            = 1
-  }
-
-  service_registries {
-    registry_arn = aws_service_discovery_service.clickhouse[0].arn
-  }
-
-  depends_on = [aws_ecs_cluster_capacity_providers.clickhouse]
-
-  tags = { Environment = var.environment, ManagedBy = "terraform" }
+# Attach the data volume to the ClickHouse instance
+resource "aws_volume_attachment" "clickhouse_data" {
+  count       = var.subnet_id != "" ? 1 : 0
+  device_name = "/dev/xvdb"
+  volume_id   = aws_ebs_volume.clickhouse_data[0].id
+  instance_id = aws_instance.clickhouse[0].id
 }

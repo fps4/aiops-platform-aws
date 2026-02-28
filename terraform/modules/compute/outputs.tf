@@ -34,6 +34,11 @@ output "orchestrator_function_name" {
 }
 
 output "grafana_url" {
-  description = "Grafana ALB URL (internal, port 3000)"
-  value       = length(aws_lb.grafana) > 0 ? "http://${aws_lb.grafana[0].dns_name}:3000" : ""
+  description = "Grafana URL (EC2 private IP, port 3000)"
+  value       = length(aws_instance.grafana) > 0 ? "http://${aws_instance.grafana[0].private_ip}:3000" : ""
+}
+
+output "grafana_instance_id" {
+  description = "Grafana EC2 instance ID (for SSM port forwarding)"
+  value       = length(aws_instance.grafana) > 0 ? aws_instance.grafana[0].id : ""
 }

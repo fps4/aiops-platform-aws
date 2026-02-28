@@ -28,8 +28,8 @@ variable "aws_region" {
   default     = "eu-central-1"
 }
 
-variable "subnet_ids" {
-  description = "Subnet IDs for the ClickHouse EC2 instance. When empty, ClickHouse resources are not created."
-  type        = list(string)
-  default     = []
+variable "subnet_id" {
+  description = "Subnet ID for the ClickHouse EC2 instance. When empty, ClickHouse resources are not created."
+  type        = string
+  default     = ""
 }

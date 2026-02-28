@@ -35,8 +35,8 @@ variable "clickhouse_port" {
   default     = 8123
 }
 
-variable "grafana_url" {
-  description = "Grafana base URL for dashboard deep-links in Slack alerts"
+variable "ec2_subnet_id" {
+  description = "Subnet ID for Grafana EC2 placement. When empty, Grafana EC2 is not created."
   type        = string
   default     = ""
 }
