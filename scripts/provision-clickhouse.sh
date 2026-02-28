@@ -76,6 +76,10 @@ ssm = boto3.client("ssm", region_name="${REGION}")
 commands = [
     "set -e",
     "echo '${SCHEMA_B64}' | base64 -d > /tmp/aiops-schema.sql",
+    # SSM agent starts before user_data finishes — wait up to 5 min for clickhouse-client
+    "echo '  Waiting for clickhouse-client to be available...'",
+    "for i in \$(seq 1 30); do command -v clickhouse-client > /dev/null 2>&1 && break || sleep 10; done",
+    "command -v clickhouse-client > /dev/null 2>&1 || { echo 'ERROR: clickhouse-client not found after 5 min'; exit 1; }",
     "clickhouse-client --multiquery < /tmp/aiops-schema.sql",
     "rm -f /tmp/aiops-schema.sql",
     "echo '--- Tables in aiops ---'",
@@ -86,7 +90,7 @@ resp = ssm.send_command(
     InstanceIds=["${INSTANCE_ID}"],
     DocumentName="AWS-RunShellScript",
     Parameters={"commands": commands},
-    TimeoutSeconds=120,
+    TimeoutSeconds=360,
     Comment="AIOps ClickHouse schema provision",
 )
 command_id = resp["Command"]["CommandId"]
