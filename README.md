@@ -49,9 +49,12 @@ The AIOps Platform autonomously **investigates anomalies before alerting you**, 
 
 | Document | Description |
 |----------|-------------|
-| [Product Summary](./docs/1-product-summary.md) | Vision, capabilities, architecture principles |
-| [UX Requirements](./docs/2-requirements-ux.md) | User workflows, personas, and feature rollout |
-| [Solution Design](./docs/3-solution-design.md) | Architecture diagrams and component details |
+| [Executive Overview](./docs/1-executive-overview.md) | Vision, scope, tenets, and outcomes |
+| [Product Requirements](./docs/2-product-requirements.md) | Functional and non-functional requirements |
+| [Product Design](./docs/3-product-design.md) | User journeys, Slack UX, and investigation flow |
+| [Technical Architecture](./docs/4-technical-architecture.md) | System architecture, components, and data flow |
+| [POC Plan](./docs/5-poc.md) | Scope, scenarios, and success criteria for validation |
+| [Guidelines](./docs/6-guidelines.md) | Role-based playbooks and activity runbooks |
 | [Terraform Guide](./terraform/README.md) | Infrastructure deployment instructions |
 | [Features Roadmap](./FEATURES.md) | Current and planned capabilities |
 
@@ -64,14 +67,15 @@ aiops-platform/
 ├── README.md                          # This file
 ├── LICENSE                            # MIT License
 ├── docs/                              # Documentation
-│   ├── product-summary.md             # Product vision and overview
-│   ├── requirements-ux.md             # User requirements and workflows
-│   ├── solution-design.md             # Architecture and technical design
-│   ├── getting-started.md             # Setup guide (coming soon)
-│   ├── detection-policies.md          # Policy configuration reference
-│   ├── ai-providers.md                # AI provider setup guide
-│   ├── architecture/                  # Architecture diagrams
-│   └── examples/                      # Example configurations
+│   ├── 1-executive-overview.md        # Product vision and scope
+│   ├── 2-product-requirements.md      # Requirements and constraints
+│   ├── 3-product-design.md            # UX and interaction design
+│   ├── 4-technical-architecture.md    # Technical architecture and components
+│   ├── 5-poc.md                       # Proof-of-concept plan and validation
+│   ├── 6-guidelines.md                # Role and activity guideline index
+│   ├── guidelines/                    # Role playbooks and activity runbooks
+│   ├── components/                    # Component deep dives
+│   └── decisions/                     # Architecture decision records (ADRs)
 │
 ├── terraform/                         # Infrastructure-as-Code
 │   ├── modules/                       # Reusable Terraform modules
@@ -360,4 +364,3 @@ Special thanks to the open-source community for:
 ---
 
 **Built for AWS • Open Source • Production Ready**
-

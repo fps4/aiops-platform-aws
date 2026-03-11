@@ -98,3 +98,12 @@ def generate_dashboard_screenshot(dashboard_url: str) -> str:
   "alt_text": "Dashboard screenshot for incident abc123"
 }
 ```
+
+## Role and activity guide mapping
+
+- **SRE On-Call**: alert consumption and decision-making workflow  
+  See [../guidelines/sre-oncall.md](../guidelines/sre-oncall.md)
+- **Platform Team**: notifier formatting, delivery reliability, and link integrity  
+  See [../guidelines/platform-team.md](../guidelines/platform-team.md)
+- **Product Engineering Teams**: remediation ownership after alert handoff  
+  See [../guidelines/product-engineering-teams.md](../guidelines/product-engineering-teams.md)

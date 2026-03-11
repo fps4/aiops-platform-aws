@@ -121,3 +121,12 @@ Hard thresholds that fire without needing a statistical baseline:
 - Security: IAM policy changes, S3 bucket public access
 
 **Output**: Same anomaly object format (`confidence = "rule_based"`).
+
+## Role and activity guide mapping
+
+- **Platform Team**: detector operation, policy tuning, and suppression behavior  
+  See [../guidelines/platform-team.md](../guidelines/platform-team.md)
+- **Product Engineering Teams**: metric quality and remediation feedback loop  
+  See [../guidelines/product-engineering-teams.md](../guidelines/product-engineering-teams.md)
+- **SRE On-Call**: consume high-signal anomalies for incident triage  
+  See [../guidelines/sre-oncall.md](../guidelines/sre-oncall.md)

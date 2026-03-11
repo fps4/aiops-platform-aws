@@ -87,3 +87,14 @@ http://<grafana-ip>:3000/d/rca-explorer/rca-evidence-explorer
 ```
 
 Grafana applies the template variable filters to all linked panels automatically.
+
+## Role and activity guide mapping
+
+- **SRE On-Call**: dashboard-first incident validation workflow  
+  See [../guidelines/sre-oncall.md](../guidelines/sre-oncall.md)
+- **Product Engineering Teams**: service-level diagnosis and validation  
+  See [../guidelines/product-engineering-teams.md](../guidelines/product-engineering-teams.md)
+- **Platform Team**: dashboard provisioning and datasource reliability  
+  See [../guidelines/platform-team.md](../guidelines/platform-team.md)
+- **Activity runbooks**: provisioning and access  
+  See [../guidelines/provisioning.md](../guidelines/provisioning.md) and [../guidelines/ssm-access.md](../guidelines/ssm-access.md)

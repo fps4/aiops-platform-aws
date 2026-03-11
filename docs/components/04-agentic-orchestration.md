@@ -107,3 +107,12 @@ response = ai_provider.generate(
 audit_log(prompt, response)   # logged to S3 for compliance
 return parse_rca_json(response)
 ```
+
+## Role and activity guide mapping
+
+- **Platform Team**: orchestrator reliability, agent sequencing, and escalation logic  
+  See [../guidelines/platform-team.md](../guidelines/platform-team.md)
+- **SRE On-Call**: incident triage decisions based on RCA output  
+  See [../guidelines/sre-oncall.md](../guidelines/sre-oncall.md)
+- **Security & Compliance**: traceability of AI-supported incident decisions  
+  See [../guidelines/security-compliance.md](../guidelines/security-compliance.md)

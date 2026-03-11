@@ -158,7 +158,7 @@ Narrowing the filter reduces Firehose ingestion cost and keeps OpenSearch free o
 
 ## Log format recommendations
 
-The normalisation Lambda maps incoming fields to the [canonical schema](../solution-design.md). The more closely your logs match it, the richer the anomaly detection context will be.
+The normalisation Lambda maps incoming fields to the canonical schema described in [4-technical-architecture.md](../4-technical-architecture.md). The more closely your logs match it, the richer the anomaly detection context will be.
 
 **Recommended structured JSON fields:**
 

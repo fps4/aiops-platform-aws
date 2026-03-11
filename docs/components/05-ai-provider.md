@@ -105,3 +105,12 @@ def get_provider_for_agent(agent_type: str) -> AIProvider:
   "anomaly_id": "anom-abc123"
 }
 ```
+
+## Role and activity guide mapping
+
+- **Platform Team**: provider selection, token caps, and model rollout governance  
+  See [../guidelines/platform-team.md](../guidelines/platform-team.md)
+- **Security & Compliance**: prompt/response audit and data handling controls  
+  See [../guidelines/security-compliance.md](../guidelines/security-compliance.md)
+- **Product Engineering Teams**: understand recommendation confidence and service context needs  
+  See [../guidelines/product-engineering-teams.md](../guidelines/product-engineering-teams.md)

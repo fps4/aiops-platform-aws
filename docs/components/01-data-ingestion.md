@@ -18,3 +18,14 @@ CloudTrail writes to CloudWatch Logs, so all events (deployments, autoscaling, c
 - Member accounts assume `ObservabilityWriteRole` (write to Kinesis Firehose)
 - Central account assumes `ObservabilityReadRole` per member (read CloudWatch metrics)
 - Least privilege: deny destructive actions, restrict to observability APIs only
+
+## Role and activity guide mapping
+
+- **Platform Team**: ingestion pipeline ownership and cross-account setup  
+  See [../guidelines/platform-team.md](../guidelines/platform-team.md)
+- **Product Engineering Teams**: service onboarding and telemetry quality  
+  See [../guidelines/product-engineering-teams.md](../guidelines/product-engineering-teams.md)
+- **Security & Compliance**: cross-account access and data handling controls  
+  See [../guidelines/security-compliance.md](../guidelines/security-compliance.md)
+- **Activity runbook**: onboarding log subscriptions  
+  See [../guidelines/subscribing-to-the-platform.md](../guidelines/subscribing-to-the-platform.md)

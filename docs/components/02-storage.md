@@ -42,3 +42,12 @@ All logs are normalized to this JSON structure by the log-normalizer Lambda befo
 3. Look up deployment version from DynamoDB (deployment event store)
 4. Add environment tag from AWS Tags API
 5. Write to ClickHouse HTTP API (port 8123) + S3
+
+## Role and activity guide mapping
+
+- **Platform Team**: schema, retention, and storage lifecycle ownership  
+  See [../guidelines/platform-team.md](../guidelines/platform-team.md)
+- **Security & Compliance**: data classification, retention, and audit controls  
+  See [../guidelines/security-compliance.md](../guidelines/security-compliance.md)
+- **Activity runbook**: infrastructure provisioning and access  
+  See [../guidelines/provisioning.md](../guidelines/provisioning.md) and [../guidelines/ssm-access.md](../guidelines/ssm-access.md)
