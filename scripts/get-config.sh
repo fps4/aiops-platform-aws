@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Get AIOps Platform Configuration from AWS
+# Get AIOps Agentic System Configuration from AWS
 # Fetches SSM parameters and resource ARNs for local development
 
 set -e

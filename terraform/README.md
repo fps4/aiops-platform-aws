@@ -1,6 +1,6 @@
 # Terraform Infrastructure
 
-This directory contains all Terraform configurations for the AIOps platform.
+This directory contains all Terraform configurations for the AIOps Agentic System.
 
 ## Structure
 

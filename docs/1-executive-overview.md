@@ -2,7 +2,7 @@
 
 ## Observe - Engage - Automate
 
-The AIOps Platform is an AWS-native, multi-account observability control plane that detects anomalies, orchestrates AI-assisted root-cause analysis (RCA), and delivers actionable alerts to engineering teams.
+The AIOps Agentic System is an AWS-native, multi-account observability control plane that detects anomalies, orchestrates AI-assisted root-cause analysis (RCA), and delivers actionable alerts to engineering teams.
 
 Phase 1 focuses on **Observe + Engage**. Autonomous remediation remains out of scope.
 

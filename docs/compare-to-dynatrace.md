@@ -1,8 +1,8 @@
-# AIOps Platform (AWS) vs Dynatrace - Gap Analysis
+# AIOps Agentic System (AWS) vs Dynatrace - Gap Analysis
 
 ## Executive Summary
 
-This analysis compares our open-source AWS-native AIOps platform (Phase 1: Observe + Engage) with Dynatrace's commercial AIOps solution. Dynatrace is a mature, enterprise-grade observability and AIOps platform with deep APM capabilities, while our solution is a focused, cloud-native, cost-optimized alternative built for AWS environments with pluggable open-source LLM support.
+This analysis compares our open-source AWS-native AIOps Agentic System (Phase 1: Observe + Engage) with Dynatrace's commercial AIOps solution. Dynatrace is a mature, enterprise-grade observability and AIOps Agentic System with deep APM capabilities, while our solution is a focused, cloud-native, cost-optimized alternative built for AWS environments with pluggable open-source LLM support.
 
 **TL;DR**: Dynatrace offers broader coverage and maturity; our platform offers AWS-native optimization, open-source flexibility, and self-hosted AI capabilities at lower cost.
 
@@ -10,7 +10,7 @@ This analysis compares our open-source AWS-native AIOps platform (Phase 1: Obser
 
 ## Feature Comparison Matrix
 
-| Capability | AIOps Platform (AWS) - Phase 1 | Dynatrace AIOps | Gap Analysis |
+| Capability | AIOps Agentic System (AWS) - Phase 1 | Dynatrace AIOps | Gap Analysis |
 |------------|--------------------------------|-----------------|--------------|
 | **Observability Coverage** |
 | Log Management | ✅ CloudWatch, S3, OpenSearch | ✅ OneAgent auto-collection | Dynatrace: automatic instrumentation, broader app coverage |
@@ -104,7 +104,7 @@ This analysis compares our open-source AWS-native AIOps platform (Phase 1: Obser
 - ✅ Need **Real User Monitoring** and frontend performance tracking
 - ✅ Require **autonomous remediation** today (not Phase 2)
 
-### Choose AIOps Platform (AWS) if you:
+### Choose AIOps Agentic System (AWS) if you:
 - ✅ Are **AWS-native** or **AWS-first** in architecture
 - ✅ Need **cost optimization** (large AWS estate, high observability data volume)
 - ✅ Require **data sovereignty** (airgap, private cloud, strict compliance)
@@ -116,7 +116,7 @@ This analysis compares our open-source AWS-native AIOps platform (Phase 1: Obser
 
 ### Hybrid Approach
 - Use **Dynatrace** for deep APM on critical applications (customer-facing services)
-- Use **AIOps Platform (AWS)** for cost-effective AWS infrastructure monitoring and alert enrichment
+- Use **AIOps Agentic System (AWS)** for cost-effective AWS infrastructure monitoring and alert enrichment
 - Correlate signals from both via a unified alert aggregation layer
 
 ---
@@ -124,7 +124,7 @@ This analysis compares our open-source AWS-native AIOps platform (Phase 1: Obser
 ## Competitive Positioning
 
 ### Market Positioning
-| Dimension | AIOps Platform (AWS) | Dynatrace |
+| Dimension | AIOps Agentic System (AWS) | Dynatrace |
 |-----------|---------------------|-----------|
 | **Target Market** | AWS-native platform teams, cost-conscious enterprises, regulated industries | Enterprise IT, multi-cloud, APM-heavy use cases |
 | **Price Point** | Infrastructure costs only (~$5K-50K/month at scale) | $100K-$1M+/year for large deployments |
@@ -180,7 +180,7 @@ This analysis compares our open-source AWS-native AIOps platform (Phase 1: Obser
 - Davis CoPilot: ~$10K-50K/year (estimate)
 - **Total**: ~**$500K-550K/year**
 
-**AIOps Platform (AWS) TCO (Annual)**
+**AIOps Agentic System (AWS) TCO (Annual)**
 - S3 (log storage): 60TB × $0.023/GB = **$1.4K/month**
 - OpenSearch Serverless: ~$300/OCU/month × 10 OCUs = **$3K/month**
 - Kinesis Firehose: 2TB/day × $0.029/GB = **$1.7K/month**
@@ -198,7 +198,7 @@ This analysis compares our open-source AWS-native AIOps platform (Phase 1: Obser
 
 **Dynatrace** is the right choice for organizations needing comprehensive, multi-cloud APM with rapid deployment and enterprise support. It's a mature, proven platform with deep observability capabilities.
 
-**AIOps Platform (AWS)** is ideal for AWS-native organizations prioritizing cost control, data sovereignty, and open-source flexibility. It trades breadth for depth in AWS ecosystems, with significant TCO advantages and self-hosted AI capabilities.
+**AIOps Agentic System (AWS)** is ideal for AWS-native organizations prioritizing cost control, data sovereignty, and open-source flexibility. It trades breadth for depth in AWS ecosystems, with significant TCO advantages and self-hosted AI capabilities.
 
 For many organizations, the decision hinges on:
 1. **Budget**: 65-75% cost reduction makes our platform attractive for large AWS estates

@@ -1,6 +1,6 @@
 # Platform Team Guide
 
-This guide defines how the platform team operates the AIOps platform as a product for internal engineering teams.
+This guide defines how the platform team operates the AIOps Agentic System as a product for internal engineering teams.
 
 ## Primary responsibilities
 

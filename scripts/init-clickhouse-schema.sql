@@ -1,4 +1,4 @@
--- AIOps Platform ClickHouse schema
+-- AIOps Agentic System ClickHouse schema
 -- Run once after ClickHouse starts: clickhouse-client < scripts/init-clickhouse-schema.sql
 
 CREATE DATABASE IF NOT EXISTS aiops;

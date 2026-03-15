@@ -1,6 +1,6 @@
 # Guidelines Index
 
-This folder contains role-based playbooks and activity-based runbooks for operating and adopting the AIOps platform.
+This folder contains role-based playbooks and activity-based runbooks for operating and adopting the AIOps Agentic System.
 
 ## Role guides
 

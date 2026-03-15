@@ -1,6 +1,6 @@
 # Security & Compliance Guide
 
-This guide outlines controls and operating practices for secure, auditable use of the AIOps platform.
+This guide outlines controls and operating practices for secure, auditable use of the AIOps Agentic System.
 
 ## Control objectives
 

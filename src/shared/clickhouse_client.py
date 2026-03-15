@@ -18,7 +18,7 @@ logger = get_logger("clickhouse_client")
 
 
 class ClickHouseClient:
-    """Thin wrapper around clickhouse-connect for the AIOps platform."""
+    """Thin wrapper around clickhouse-connect for the AIOps Agentic System."""
 
     def __init__(
         self,

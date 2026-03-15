@@ -1,4 +1,4 @@
-# AIOps Platform
+# AIOps Agentic System
 
 **Observe - Engage - Automate**
 
@@ -12,7 +12,7 @@ An open-source, AWS-native observability control plane that centralizes multi-ac
 
 ## 🎯 What is this?
 
-The AIOps Platform autonomously **investigates anomalies before alerting you**, so you receive answers—not just notifications.
+The AIOps Agentic System autonomously **investigates anomalies before alerting you**, so you receive answers—not just notifications.
 
 **Instead of**: "⚠️ Latency spike detected on api-gateway"  
 **You get**: "🚨 Latency spike on api-gateway caused by deployment v2.3.1 (85% confidence). DB query timeout in /users endpoint. [View Dashboard →]"

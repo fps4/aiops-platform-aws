@@ -1,6 +1,6 @@
-# Subscribing an Application to the AIOps Platform
+# Subscribing an Application to the AIOps Agentic System
 
-This guide explains how to route CloudWatch logs from an application into the AIOps platform so that they are normalised, stored, and monitored for anomalies.
+This guide explains how to route CloudWatch logs from an application into the AIOps Agentic System so that they are normalised, stored, and monitored for anomalies.
 
 ---
 

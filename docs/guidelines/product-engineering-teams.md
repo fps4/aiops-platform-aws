@@ -1,6 +1,6 @@
 # Product Engineering Teams Guide
 
-This guide helps service teams onboard to the AIOps platform and own alert outcomes for their systems.
+This guide helps service teams onboard to the AIOps Agentic System and own alert outcomes for their systems.
 
 ## What your team owns
 
